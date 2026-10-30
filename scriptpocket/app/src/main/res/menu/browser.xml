@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:id="@+id/m_back" android:title="Back" />
+    <item android:id="@+id/m_forward" android:title="Forward" />
+    <item android:id="@+id/m_reload" android:title="Reload" />
+    <item android:id="@+id/m_home" android:title="Home" />
+    <item android:id="@+id/m_this_page" android:title="On this page" />
+    <item android:id="@+id/m_scripts" android:title="My scripts" />
+    <item android:id="@+id/m_new" android:title="New script for this site" />
+    <item android:id="@+id/m_install" android:title="Install from a link" />
+    <item android:id="@+id/m_log" android:title="Script log" />
+    <item android:id="@+id/m_settings" android:title="Settings" />
+</menu>

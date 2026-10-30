@@ -1,0 +1,57 @@
+plugins {
+    id 'com.android.application'
+}
+
+def buildNumber = (System.getenv('GITHUB_RUN_NUMBER') ?: '1').toInteger()
+
+android {
+    namespace 'com.itsjustajack.scriptpocket'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.itsjustajack.scriptpocket'
+        minSdk 26
+        targetSdk 34
+        versionCode buildNumber
+        versionName "1.0.${buildNumber}"
+    }
+
+    // A fixed key so every new build installs over the old one and keeps your scripts.
+    // It's in the repo on purpose: this app is sideloaded, not published to the Play Store.
+    signingConfigs {
+        shared {
+            storeFile file('scriptpocket.keystore')
+            storePassword 'scriptpocket'
+            keyAlias 'scriptpocket'
+            keyPassword 'scriptpocket'
+        }
+    }
+
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.shared
+        }
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.shared
+        }
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    lint {
+        checkReleaseBuilds false
+        abortOnError false
+    }
+}
+
+dependencies {
+    implementation 'androidx.webkit:webkit:1.12.1'
+}

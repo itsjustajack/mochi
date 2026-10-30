@@ -1,0 +1,53 @@
+name: Build ScriptPocket APK
+
+on:
+  push:
+    paths:
+      - 'scriptpocket/**'
+      - '.github/workflows/scriptpocket.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Build the APK
+        working-directory: scriptpocket
+        run: gradle assembleRelease --no-daemon --stacktrace
+
+      - name: Name the APK
+        run: cp scriptpocket/app/build/outputs/apk/release/app-release.apk ScriptPocket.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ScriptPocket-apk
+          path: ScriptPocket.apk
+
+      # A release page is the easiest place to download from on a phone.
+      - name: Publish to the "ScriptPocket" release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: scriptpocket-latest
+          name: ScriptPocket (latest build)
+          target_commitish: ${{ github.sha }}
+          make_latest: true
+          body: |
+            Newest ScriptPocket build (version 1.0.${{ github.run_number }}, from branch ${{ github.ref_name }}).
+
+            On your Android phone: tap **ScriptPocket.apk** below, open it, and allow installing from your browser if asked.
+            Installing a newer build over the old one keeps your scripts.
+          files: ScriptPocket.apk

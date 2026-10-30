@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:id="@+id/m_new" android:icon="@drawable/ic_add"
+        android:showAsAction="always" android:title="New script" />
+    <item android:id="@+id/m_install" android:showAsAction="never" android:title="Install from a link" />
+    <item android:id="@+id/m_import" android:showAsAction="never" android:title="Import a file" />
+    <item android:id="@+id/m_updates" android:showAsAction="never" android:title="Check for updates" />
+    <item android:id="@+id/m_backup" android:showAsAction="never" android:title="Back up all scripts" />
+    <item android:id="@+id/m_restore" android:showAsAction="never" android:title="Restore a backup" />
+    <item android:id="@+id/m_log" android:showAsAction="never" android:title="Script log" />
+</menu>
