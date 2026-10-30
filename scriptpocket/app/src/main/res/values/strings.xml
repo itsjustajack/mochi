@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ScriptPocket</string>
+    <string name="my_scripts">My scripts</string>
+    <string name="address_hint">Search or type a web address</string>
+    <string name="run_userscripts">Run userscripts</string>
+    <string name="empty_scripts">No scripts yet.\n\nTap + to write one, or open a link that ends in .user.js (for example on greasyfork.org) in the browser and the app will offer to install it.</string>
+</resources>

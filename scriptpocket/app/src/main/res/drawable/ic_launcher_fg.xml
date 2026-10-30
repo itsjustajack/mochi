@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- a pocket -->
+    <path android:fillColor="#FFFFFF"
+        android:pathData="M33,38L75,38L75,62C75,72 66,80 54,80C42,80 33,72 33,62Z" />
+    <!-- code brackets on it -->
+    <path android:strokeColor="#1F6F5C" android:strokeWidth="4.5"
+        android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:pathData="M47,51L41,57.5L47,64M61,51L67,57.5L61,64" />
+    <!-- stitched top edge -->
+    <path android:strokeColor="#F2A93B" android:strokeWidth="4" android:strokeLineCap="round"
+        android:pathData="M33,38L75,38" />
+    <!-- a page sticking out -->
+    <path android:fillColor="#F2A93B"
+        android:pathData="M58,26L70,28L68,38L56,38Z" />
+</vector>
