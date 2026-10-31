@@ -1,0 +1,29 @@
+# HARD LIMITS. Only Jack edits this file, by hand.
+# After any change run `helper policy approve`, or every tier 2 and 3 call is refused.
+# Nothing below this layer (settings, profiles, agents, task words) can go past these.
+#
+# Tiers: 0 = read / harmless, 1 = small reversible, 2 = changes things (asks unless allowlisted),
+#        3 = destructive or outward (always asks, no "always allow").
+
+[limits]
+max_steps = 15            # per task
+max_minutes = 10          # per task
+max_tokens = 30000        # model tokens per task
+max_tier2_calls = 10      # tier 2+ calls per task
+approval_timeout_s = 600  # silence = deny
+fatigue_max = 5           # approvals asked in the window before the task pauses
+fatigue_window_s = 600
+breaker_denials = 3       # gate denials in one task before it is stopped
+max_result_chars = 16000  # tool output is cut to this before the model sees it
+
+[tools]
+list_folder = 0
+read_file = 0
+roll_dice = 0
+write_file = 2
+move_file = 2
+delete_file = 3
+
+# Tools that are off everywhere, whatever an agent asks for.
+# There is deliberately no shell tool at all.
+disabled = []

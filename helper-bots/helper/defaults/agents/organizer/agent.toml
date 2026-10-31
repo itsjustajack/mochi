@@ -1,0 +1,11 @@
+name = "Organizer"
+order = 1              # position in the avatar rail
+role = "You keep files and folders tidy: list, read, move and rename files in the allowed folders."
+color = "#7cc4a4"
+avatar = ""            # empty = two-dot face in the colour above; or an emoji like "📁"
+tools = ["list_folder", "read_file", "write_file", "move_file", "delete_file"]
+roots = ["work"]       # must be inside the policy roots
+ask_always = []        # tools this agent should always ask about, even if allowlisted
+
+[limits]
+max_steps = 12

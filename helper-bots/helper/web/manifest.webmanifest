@@ -1,0 +1,9 @@
+{
+  "name": "Helper",
+  "short_name": "Helper",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#101412",
+  "theme_color": "#101412",
+  "icons": [{"src": "/icon.svg", "sizes": "any", "type": "image/svg+xml"}]
+}
