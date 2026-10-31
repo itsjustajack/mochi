@@ -1,0 +1,102 @@
+name: Helper (tests, phone app, engine)
+
+on:
+  push:
+    paths:
+      - 'helper-bots/**'
+      - '.github/workflows/helper.yml'
+  pull_request:
+    paths:
+      - 'helper-bots/**'
+      - '.github/workflows/helper.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Engine tests
+        working-directory: helper-bots
+        run: python -m unittest discover -s tests -t . -v
+
+  apk:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      # Signing key from repo secrets (Settings > Secrets and variables > Actions):
+      #   HELPER_KEYSTORE_B64 = the keystore file, base64-encoded
+      #   HELPER_KEYSTORE_PASSWORD = its password
+      - name: Load the signing key
+        env:
+          KS_B64: ${{ secrets.HELPER_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/helper.keystore"
+            echo "HELPER_KEYSTORE_FILE=$RUNNER_TEMP/helper.keystore" >> "$GITHUB_ENV"
+          else
+            echo "::warning::HELPER_KEYSTORE_B64 is not set, so this APK uses a throwaway debug key and won't update an installed Helper."
+          fi
+
+      - name: Build Helper.apk
+        working-directory: helper-bots/android
+        env:
+          HELPER_KEYSTORE_PASSWORD: ${{ secrets.HELPER_KEYSTORE_PASSWORD }}
+        run: gradle assembleRelease --no-daemon --stacktrace
+
+      - name: Package the APK and the Termux engine
+        run: |
+          cp helper-bots/android/app/build/outputs/apk/release/app-release.apk Helper.apk
+          (cd helper-bots && zip -r ../helper-engine.zip pyproject.toml README.md helper -x '*/__pycache__/*')
+          cp helper-bots/scripts/install-termux.sh install-termux.sh
+          keytool -printcert -jarfile Helper.apk | grep -i sha256 | head -1 > signing.txt || true
+          cat signing.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Helper-phone
+          path: |
+            Helper.apk
+            helper-engine.zip
+            install-termux.sh
+
+      # A release page is the easiest place to download from on a phone.
+      - name: Publish to the "Helper" release
+        if: github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: helper-latest
+          name: Helper for Android (latest build)
+          target_commitish: ${{ github.sha }}
+          prerelease: true
+          make_latest: false
+          body: |
+            Newest Helper build (app version 0.1.${{ github.run_number }}, from branch ${{ github.ref_name }}).
+
+            On your phone:
+            1. Download **Helper.apk**, **helper-engine.zip** and **install-termux.sh** below.
+            2. In Termux: `termux-setup-storage`, then `cd ~/storage/downloads && bash install-termux.sh`
+            3. Install Helper.apk (switch Auto Blocker off just for the install), open it and paste the key.
+
+            Installing a newer Helper.apk over the old one keeps your settings.
+          files: |
+            Helper.apk
+            helper-engine.zip
+            install-termux.sh

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Helper</string>
+    <string name="widget_name">Helper status</string>
+    <string name="tile_name">Stop Helper</string>
+</resources>

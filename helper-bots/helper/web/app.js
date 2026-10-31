@@ -59,10 +59,13 @@ function signOut(msg) {
 async function boot() {
   // The key arrives once in the URL fragment (never sent to the server), then is cleared from the address bar.
   const m = location.hash.match(/key=([A-Za-z0-9_\-]+)/);
-  if (m) {
-    localStorage.setItem(KEY_STORE, m[1]);
-    history.replaceState(null, "", location.pathname);
+  // Text shared to the phone app arrives the same way. It only fills the message box; you still press Send.
+  const sh = location.hash.match(/share=([^&]*)/);
+  if (sh) {
+    try { state.share = decodeURIComponent(sh[1].replace(/\+/g, " ")).slice(0, 4000); } catch (e) { state.share = ""; }
   }
+  if (m) localStorage.setItem(KEY_STORE, m[1]);
+  if (m || sh) history.replaceState(null, "", location.pathname);
   state.key = localStorage.getItem(KEY_STORE) || "";
   if (!state.key) return signOut("");
   try {
@@ -79,7 +82,16 @@ async function boot() {
   selectAgent(state.current);
   poll();
   if (!state.timer) state.timer = setInterval(poll, 1200);
+  if (state.share) {
+    $("input").value = state.share;
+    state.share = "";
+    autosize();
+    $("input").focus();
+  }
 }
+
+// The phone app calls this after its fingerprint/PIN check, or when you come back to the app.
+window.helperRefresh = () => { state.lastRender = ""; poll(); };
 
 $("signin-form").addEventListener("submit", (ev) => {
   ev.preventDefault();
@@ -87,8 +99,7 @@ $("signin-form").addEventListener("submit", (ev) => {
   if (!k) return;
   localStorage.setItem(KEY_STORE, k);
   $("signin-key").value = "";
-  window.addEventListener("hashchange", () => { if (!state.key || /key=/.test(location.hash)) boot(); });
-boot();
+  boot();
 });
 
 // ---------------------------------------------------------------- rail and header
@@ -189,7 +200,10 @@ function approvalCard(task, ev) {
       b.type = "button";
       b.addEventListener("click", async () => {
         row.querySelectorAll("button").forEach((x) => (x.disabled = true));
-        try { await api("POST", "/v1/approvals/" + encodeURIComponent(a.id), { verdict: v }); } catch (e) { alert(e.message); }
+        // In the phone app, Approve goes through Android's fingerprint/PIN check, which shows the
+        // action as helperd reports it. Deny and Stop are the safe direction and need no check.
+        if (v === "approve" && window.HelperApp && HelperApp.isApp()) { HelperApp.approve(a.id); return; }
+        try { await api("POST", "/v1/approvals/" + encodeURIComponent(a.id), { verdict: v }); } catch (e) { showError(e.message); }
         poll();
       });
     }
@@ -235,6 +249,11 @@ function renderChat() {
     }
   }
   if (atBottom || tasks.length) chat.scrollTop = chat.scrollHeight;
+}
+
+function showError(msg) {
+  $("banner").hidden = false;
+  $("banner").textContent = msg;
 }
 
 function lineOf(kind, text) {

@@ -33,9 +33,45 @@ It uses the Python standard library only, so it installs the same way in Termux 
   *Approve once / Discard / Stop task*, a Stop-all button, and a phone layout. Every API route needs the
   key, the Host header is checked, there is no CORS, and a strict Content-Security-Policy is set.
 
+## The phone app (Helper.apk)
+
+`android/` is a small Android app (Android 11+, no third-party libraries). It contains no model and no
+tools. It shows the engine's own app from `127.0.0.1` in a locked-down WebView and adds what a web page
+can't do:
+
+- **Approve with your fingerprint or PIN.** Approve once opens Android's check, which shows the action
+  as the engine reports it. Deny and Stop need no check because they only reduce what the bots do.
+- **Notifications** when an agent needs your OK. They name the agent and action only, with no file names,
+  and have a Deny button. Review opens the full card.
+- **A home-screen widget** that shows the status and how many requests are waiting, with Open and Stop all.
+- **A quick-settings tile** that stops every task.
+- **Share to Helper**, which puts shared text in the message box. It never runs by itself.
+- **A Start Helper in Termux button** for when the engine isn't running.
+
+The key is stored encrypted with a key held in the Android Keystore, and `allowBackup` is off. The
+WebView can only load `127.0.0.1` and has file access turned off.
+
+**Install on the phone.** Every push builds the app. Open the "Helper for Android (latest build)"
+release on GitHub and download `Helper.apk`, `helper-engine.zip` and `install-termux.sh`. Then in
+Termux run `termux-setup-storage`, then `cd ~/storage/downloads && bash install-termux.sh`. Install
+the APK, open it and paste the key; the script copies the key for you.
+
+**Signing key (once).** So that each new build installs over the old one, the app is signed with
+your own key, kept as a GitHub secret and never in the repo. On the PC:
+
+```
+keytool -genkeypair -keystore helper.keystore -alias helper -keyalg RSA -keysize 3072 -validity 10000 -dname "CN=Helper"
+base64 -w0 helper.keystore     # PowerShell: [Convert]::ToBase64String([IO.File]::ReadAllBytes("helper.keystore"))
+```
+
+Add two repository secrets (Settings > Secrets and variables > Actions): `HELPER_KEYSTORE_B64` (the
+base64 text) and `HELPER_KEYSTORE_PASSWORD`. Keep `helper.keystore` somewhere safe. Until the
+secrets are set, builds use a throwaway key and the build log shows a warning. Each build prints its
+signing fingerprint so you can check it.
+
 ## Not in this version yet
 
-Memory (SQLite), skills and the sandbox, the Helper.apk shell and home-screen widgets, Windows tray and
+Memory (SQLite), skills and the sandbox, more widgets (Ask bar, Quick actions, Profile), Windows tray and
 toasts, Settings screen, reminders, sync between devices, the Muse model route, the consistency-check
 model call, and the eval set. These follow the build order in the design doc.
 
@@ -51,8 +87,8 @@ python -m helper ask "list what is in my work folder"
 python -m helper serve         # then open the link it prints once
 ```
 
-On the phone (Termux): `pkg install python`, then the same commands with `qwen3:4b` in
-`~/.helper/settings.toml`. Files the bots may touch go in `~/.helper/work/`.
+On the phone, use `scripts/install-termux.sh` (see below). It installs Python and Ollama, sets
+`qwen3:4b`, and adds a Termux:Boot start script. Files the bots may touch go in `~/.helper/work/`.
 
 ## Tests
 
