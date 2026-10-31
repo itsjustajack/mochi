@@ -44,7 +44,13 @@ BOOT
 chmod 700 ~/.termux/boot/helper.sh
 
 echo "== Copying your key to the clipboard for the Helper app"
-termux-clipboard-set < ~/.helper/secret/token && echo "Key copied. Paste it into the Helper app."
+# termux-clipboard-set waits forever if the Termux:API app isn't installed, so give it 5 seconds.
+if timeout 5 termux-clipboard-set < ~/.helper/secret/token 2>/dev/null; then
+  echo "Key copied. Paste it into the Helper app."
+else
+  echo "Could not copy the key (install the Termux:API app for that). Your key is:"
+  cat ~/.helper/secret/token; echo
+fi
 
 cat <<'NEXT'
 
