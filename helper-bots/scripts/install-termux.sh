@@ -1,6 +1,6 @@
 #!/data/data/com.termux/files/usr/bin/bash
 # Sets up Helper's engine in Termux. Run it from the folder that holds helper-engine.zip
-# (or from the unzipped helper-bots folder):   bash install-termux.sh
+# (or from the unzipped helper-bots folder):   bash install-termux*.sh
 set -euo pipefail
 
 echo "== Helper: installing Python, Termux:API tools and Ollama"
@@ -8,12 +8,15 @@ pkg update -y
 pkg install -y python termux-api ollama
 
 echo "== Installing the Helper engine"
-if [ -f helper-engine.zip ]; then
-  pip install --upgrade ./helper-engine.zip
+# Phone browsers sometimes rename downloads ("helper-engine (1).zip"), so take the newest match.
+ENGINE="$(ls -t helper-engine*.zip 2>/dev/null | head -n 1 || true)"
+if [ -n "$ENGINE" ]; then
+  echo "   using $ENGINE"
+  pip install --upgrade "./$ENGINE"
 elif [ -f pyproject.toml ]; then
   pip install --upgrade .
 else
-  echo "Put helper-engine.zip next to this script first." >&2
+  echo "Put helper-engine.zip in the same folder as this script first (it is on the same release page)." >&2
   exit 1
 fi
 

@@ -53,7 +53,7 @@ WebView can only load `127.0.0.1` and has file access turned off.
 
 **Install on the phone.** Every push builds the app. Open the "Helper for Android (latest build)"
 release on GitHub and download `Helper.apk`, `helper-engine.zip` and `install-termux.sh`. Then in
-Termux run `termux-setup-storage`, then `cd ~/storage/downloads && bash install-termux.sh`. Install
+Termux run `termux-setup-storage`, then `cd ~/storage/downloads && bash install-termux*.sh`. Install
 the APK, open it and paste the key; the script copies the key for you.
 
 **Signing key (once).** So that each new build installs over the old one, the app is signed with

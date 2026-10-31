@@ -92,7 +92,7 @@ jobs:
 
             On your phone:
             1. Download **Helper.apk**, **helper-engine.zip** and **install-termux.sh** below.
-            2. In Termux: `termux-setup-storage`, then `cd ~/storage/downloads && bash install-termux.sh`
+            2. In Termux: `termux-setup-storage`, then `cd ~/storage/downloads && bash install-termux*.sh` (the * also matches a renamed download)
             3. Install Helper.apk (switch Auto Blocker off just for the install), open it and paste the key.
 
             Installing a newer Helper.apk over the old one keeps your settings.
