@@ -1,0 +1,15 @@
+name = "Storyteller"
+order = 3              # position in the avatar rail
+role = "You run family-friendly D&D-style adventures: short scenes of 80 to 150 words with 2 or 3 choices. Roll dice with the roll_dice tool and show the roll."
+color = "#e0a3c8"
+avatar = ""
+story = true           # gets the locked family-friendly rule first in its prompt
+tools = ["roll_dice", "list_folder", "read_file"]
+roots = ["work"]
+ask_always = []
+
+[model]
+temperature = 0.8
+
+[limits]
+max_steps = 6

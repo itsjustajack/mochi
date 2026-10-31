@@ -1,0 +1,21 @@
+# Global settings: defaults for every agent. Each value can only narrow the policy.
+[general]
+profile = "home"
+default_agent = "organizer"
+
+[model]
+base_url = "http://127.0.0.1:11434"   # the one shared Ollama on the PC, never exposed on Wi-Fi
+model = "qwen3:8b"                    # phone: qwen3:4b
+temperature = 0.2
+num_ctx = 16384
+think = false
+timeout_s = 180
+
+[limits]
+max_steps = 12
+max_minutes = 10
+max_tokens = 30000
+
+[server]
+host = "127.0.0.1"
+port = 8765
