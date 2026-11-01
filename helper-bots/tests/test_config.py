@@ -12,7 +12,7 @@ class ConfigTests(unittest.TestCase):
         self.env.close()
 
     def test_starter_agents_load(self):
-        self.assertEqual(set(self.env.agents), {"organizer", "notes", "storyteller", "research", "jace", "quill"})
+        self.assertEqual(set(self.env.agents), {"organizer", "notes", "storyteller", "research", "jace", "quill", "inbox", "vault", "pip", "ward"})
 
     def test_agent_cannot_exceed_policy_limits(self):
         a = build_agent("x", {"tools": ["read_file"], "limits": {"max_steps": 999}},

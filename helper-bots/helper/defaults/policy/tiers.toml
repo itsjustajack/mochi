@@ -29,9 +29,20 @@ knowledge_read = 0    # read a file from linked Drive folders
 private_search = 0    # Jack's private records (real life, kept apart from story lore)
 remind = 1            # set a reminder for Jack (undo removes it)
 private_propose = 1   # add a draft private record; never a password, only where it lives
+# Linked accounts (only work after Jack links the account himself)
+gmail_search = 0      # read and sort email (email text is untrusted)
+gmail_read = 0
+gmail_draft = 1       # a Gmail draft; nothing is sent
+gmail_archive = 2
+gmail_label = 2
+trello_boards = 0
+trello_add_card = 2
 write_file = 2
 move_file = 2
 delete_file = 3
+gmail_send = 3
+gmail_trash = 3
+gmail_unsubscribe = 3
 
 # Tools that are off everywhere, whatever an agent asks for.
 # There is deliberately no shell tool at all.

@@ -150,6 +150,8 @@ class App:
                          "knowledge": [str(k) for k in pol.knowledge]}
         if path.startswith("/v1/checklists") or path.startswith("/v1/done"):
             return self.handle_checklists(method, path, body or {}, by=by)
+        if path.startswith("/v1/accounts") or path.startswith("/v1/inbox"):
+            return self.handle_accounts(method, path, body or {}, by)
         if path.split("/")[2] in ("today", "calm", "reminders", "capture"):
             return self.handle_today(method, path, body or {}, by)
         if path.startswith("/v1/ledger"):
@@ -161,6 +163,62 @@ class App:
         if method == "GET" and path == "/v1/activity":
             return 200, {"events": self.runner.audit.tail(200)}
         return 404, {"error": "not found"}
+
+    def handle_accounts(self, method: str, path: str, body: dict, by: str) -> tuple[int, dict]:
+        """Settings > Accounts, and the Inbox screen (morning readout and piles)."""
+        from helper import accounts
+        home = self.runner.home_root
+        linked = accounts.Linked(home)
+        parts = [p for p in path.split("/") if p]
+        if parts[1] == "inbox":
+            from helper.scheduler import Scheduler
+            sched = Scheduler(home, self.settings, self.runner.audit)
+            if method == "GET" and len(parts) == 2:
+                return 200, {"readout": sched.latest_readout(), "linked": bool(linked.info("gmail"))}
+            if method == "POST" and parts[2:] == ["readout"]:
+                return 200, {"readout": sched.build_readout()}
+            if method == "GET" and parts[2:] == ["piles"]:
+                try:
+                    rows = accounts.Gmail(home).search(str(body.get("q", "")) or "in:inbox newer_than:2d", 40)
+                except accounts.AccountError as e:
+                    return 409, {"error": str(e)}
+                return 200, {"piles": {p: [m for m in rows if m["pile"] == p] for p in accounts.PILES},
+                             "names": accounts.PILE_WORDS}
+            return 404, {"error": "not found"}
+        if method == "GET" and len(parts) == 2:
+            return 200, {"accounts": linked.public(self.agents, self.runner.gate.checklists)}
+        if method == "POST" and len(parts) == 4 and parts[3] == "unlink" and parts[2] in accounts.PROVIDERS:
+            linked.unlink(parts[2])
+            self.runner.audit.write("system", event="unlink", account=parts[2], by=by)
+            return 200, {"unlinked": parts[2]}
+        if method == "POST" and len(parts) == 4 and parts[3] == "link":
+            if by.startswith("link:"):
+                return 403, {"error": "Link accounts on the PC: the sign-in opens in the PC's browser."}
+            try:
+                if parts[2] == "trello":
+                    res = accounts.link_trello(home, str(body.get("key", "")), str(body.get("token", "")))
+                elif parts[2] == "gmail":
+                    cid, csec = str(body.get("client_id", "")).strip(), str(body.get("client_secret", "")).strip()
+                    if not cid or not csec:
+                        return 400, {"error": "paste the Google client id and secret first"}
+                    threading.Thread(target=self._link_gmail, args=(cid, csec, bool(body.get("can_change")), by),
+                                     daemon=True).start()
+                    return 202, {"started": "gmail", "text": "Finish signing in to Google in your browser."}
+                else:
+                    return 404, {"error": "no such account type"}
+            except accounts.AccountError as e:
+                return 400, {"error": str(e)}
+            self.runner.audit.write("system", event="link_account", account=parts[2], by=by)
+            return 200, res
+        return 404, {"error": "not found"}
+
+    def _link_gmail(self, cid: str, csec: str, can_change: bool, by: str) -> None:
+        from helper import accounts
+        try:
+            accounts.link_gmail(self.runner.home_root, cid, csec, can_change)
+            self.runner.audit.write("system", event="link_account", account="gmail", can_change=can_change, by=by)
+        except accounts.AccountError as e:
+            self.runner.audit.write("system", event="link_account_failed", account="gmail", error=str(e), by=by)
 
     def handle_today(self, method: str, path: str, body: dict, by: str) -> tuple[int, dict]:
         """Needs you, Just one thing, Too much, quiet hours, reminders and the brain dump."""
