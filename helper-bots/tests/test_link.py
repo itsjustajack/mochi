@@ -87,16 +87,17 @@ class LinkServerTests(unittest.TestCase):
         cls.env = Env()
         cls.runner = cls.env.runner([])
         cls.reg = DeviceRegistry(cls.env.home.state_dir / "link_devices.json")
-        cls.app = LinkApp(cls.reg, cls.runner, cls.env.agents, cls.env.settings, "test")
+        cls.pc = App(cls.runner, cls.env.agents, "pc-key", cls.env.settings, port=0, registry=cls.reg,
+                     link_cfg={"enabled": True, "host": "192.168.1.20", "port": 8766})
+        cls.app = LinkApp(cls.reg, cls.runner, cls.env.agents, cls.env.settings, "test", pc_app=cls.pc)
         cls.httpd = serve_link(cls.app, "127.0.0.1", 0)
         cls.port = cls.httpd.server_address[1]
         cls.httpd.RequestHandlerClass = make_link_handler(cls.app, "127.0.0.1", cls.port)
         threading.Thread(target=cls.httpd.serve_forever, daemon=True).start()
         code = cls.reg.start_pairing()["code"]
         _, _, body = cls.req("POST", "/v2/pair", {"code": code, "name": "Test phone"}, key=None)
-        cls.key = json.loads(body)["key"]
-        cls.pc = App(cls.runner, cls.env.agents, "pc-key", cls.env.settings, port=0, registry=cls.reg,
-                     link_cfg={"enabled": True, "host": "192.168.1.20", "port": 8766})
+        cls.paired = json.loads(body)
+        cls.key = cls.paired["key"]
 
     @classmethod
     def tearDownClass(cls):
@@ -135,10 +136,32 @@ class LinkServerTests(unittest.TestCase):
     def test_bad_pair_code(self):
         self.assertEqual(self.req("POST", "/v2/pair", {"code": "NOPE", "name": "x"}, key=None)[0], 403)
 
-    def test_phone_cannot_approve_stop_or_reach_pc_api(self):
-        for path in ("/v2/approvals/abc", "/v2/stop", "/v2/start", "/v1/approvals/abc", "/v1/stop"):
+    def test_phone_reaches_app_routes_but_never_pairing(self):
+        for path in ("/v1/approvals/abc", "/v1/stop", "/v2/app/link/pair", "/v2/app/link/devices/x/remove",
+                     "/v2/app/activity"):
             self.assertEqual(self.req("POST", path, {"verdict": "approve"})[0], 404, path)
+        self.assertEqual(self.req("GET", "/v2/app/link")[0], 404)
         self.assertEqual(self.req("PUT", "/v2/jobs", {})[0], 405)
+        code, _, body = self.req("GET", "/v2/app/checklists/organizer")
+        self.assertEqual(code, 200)
+        code, _, body = self.req("POST", "/v2/app/checklists/organizer", {"job": "move_file", "choice": "never"})
+        self.assertEqual(code, 200)
+        self.assertTrue(json.loads(body)["change"]["by"].startswith("link:"))
+        self.req("POST", "/v2/app/checklists/organizer", {"job": "move_file", "choice": "ask"})
+        code, _, body = self.req("GET", "/v2/app/today")
+        self.assertEqual(code, 200)
+        self.assertIn("items", json.loads(body))
+
+    def test_encrypted_note_from_phone(self):
+        import base64
+        from helper import crypto
+        key = base64.b64decode(self.paired["notes_key"])
+        blob = crypto.encrypt_note(key, "need to call the dentist\nbuy milk")
+        code, _, body = self.req("POST", "/v2/notes", {"note": base64.b64encode(blob).decode()})
+        self.assertEqual(code, 201, body)
+        self.assertEqual(json.loads(body)["items"], 2)
+        bad = crypto.encrypt_note(b"x" * 32, "hi")
+        self.assertEqual(self.req("POST", "/v2/notes", {"note": base64.b64encode(bad).decode()})[0], 400)
 
     def test_job_round_trip_and_ownership(self):
         self.runner.model.script = [{"action": "done", "args": {"answer": "hello from the PC"}}]

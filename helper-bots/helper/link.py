@@ -6,9 +6,10 @@ How it works
   The code works once, for 5 minutes, and is cancelled after 5 wrong tries.
 - A key per device: each device gets its own random key. Only a SHA-256 of it is kept on the PC,
   in the state folder that no tool can touch. Jack can remove a device at any time.
-- What a linked device can do: check the PC is awake, send a job to an agent, follow its own jobs,
-  and see how many approvals are waiting. It can never approve, stop or start, change settings,
-  see keys or list other devices. Those stay on the PC.
+- What a linked device can do: everything the PC app does for Jack (jobs, OK cards, Stop all,
+  Settings and checklists, reminders, Calm mode, records), through /v2/app/..., plus sending
+  encrypted brain dump notes. The phone asks for Jack's fingerprint before it approves.
+  It can never pair or remove devices or see keys: those stay on the PC.
 - The link listener is off until Jack turns it on in settings.toml ([link] enabled = true) and gives
   the PC's home Wi-Fi address. It never listens on every address (0.0.0.0).
 
@@ -148,7 +149,14 @@ def qr_payload(host: str, port: int, code: str) -> str:
 class LinkApp:
     """Phone-facing routes. A device can send and follow jobs, nothing more."""
 
-    def __init__(self, registry: DeviceRegistry, runner, agents: dict, settings: dict, version: str = ""):
+    # What a paired phone can reach on the PC app (Settings works fully from the phone).
+    # Pairing and the device list stay on the PC: /v1/link is never reachable from a phone.
+    PHONE_ROUTES = ("status", "agents", "tasks", "approvals", "stop", "start", "checklists", "done", "today",
+                    "calm", "reminders", "capture", "ledger", "private", "content", "rules", "accounts", "inbox")
+
+    def __init__(self, registry: DeviceRegistry, runner, agents: dict, settings: dict, version: str = "",
+                 pc_app=None):
+        self.pc_app = pc_app
         self.registry = registry
         self.runner = runner
         self.agents = agents
@@ -174,7 +182,10 @@ class LinkApp:
         if not res:
             return 403, {"error": "that code didn't work. Make a new one on the PC and try again."}
         self.runner.audit.write("system", event="link_paired", device=res["id"])
-        return 201, {"device_id": res["id"], "key": res["key"]}
+        import base64
+        from helper import crypto
+        notes_key = base64.b64encode(crypto.notes_key(self.runner.home_root)).decode()
+        return 201, {"device_id": res["id"], "key": res["key"], "notes_key": notes_key}
 
     def handle(self, method: str, path: str, body: dict | None, device: dict) -> tuple[int, dict]:
         gate = self.runner.gate
@@ -203,8 +214,25 @@ class LinkApp:
                 return 404, {"error": "no such job"}
             return 200, t.public()
         if method == "GET" and path == "/v2/approvals":
-            # Count only. Approving is done on the PC, by Jack.
             return 200, {"pending": len(gate.approvals.pending())}
+        if method == "POST" and path == "/v2/notes":
+            # An encrypted brain dump note from the phone (see helper.capture).
+            import base64
+            import binascii
+            from helper import crypto
+            from helper.capture import CaptureStore
+            try:
+                blob = base64.b64decode(str((body or {}).get("note", "")), validate=True)
+                row = CaptureStore(self.runner.home_root / "state").add_encrypted(
+                    crypto.notes_key(self.runner.home_root), blob, f"phone:{device['name'][:30]}")
+            except (ValueError, binascii.Error, UnicodeDecodeError):
+                return 400, {"error": "that note didn't open (wrong key or damaged)"}
+            return 201, {"id": row["id"], "items": len(row["items"])}
+        if path.startswith("/v2/app/") and self.pc_app is not None:
+            route = path[len("/v2/app/"):].split("/", 1)[0]
+            if route not in self.PHONE_ROUTES:
+                return 404, {"error": "not found"}
+            return self.pc_app.handle(method, "/v1/" + path[len("/v2/app/"):], body, by=who)
         return 404, {"error": "not found"}
 
 

@@ -27,6 +27,7 @@ ledger_propose = 1    # add a draft entry; only Jack makes canon
 knowledge_search = 0  # search linked Drive folders (read-only)
 knowledge_read = 0    # read a file from linked Drive folders
 private_search = 0    # Jack's private records (real life, kept apart from story lore)
+remind = 1            # set a reminder for Jack (undo removes it)
 private_propose = 1   # add a draft private record; never a password, only where it lives
 write_file = 2
 move_file = 2

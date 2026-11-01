@@ -164,6 +164,10 @@ def run_undo(undo: dict, ctx: ToolContext) -> str:
         b.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(p), str(b))
         return f"Moved {p.name} back"
+    if kind == "reminder":
+        from helper.calm import Reminders
+        Reminders(ctx.home / "state").drop(undo["id"])
+        return "Removed the reminder"
     if kind == "call":  # e.g. un-archive an email: a fixed reverse call on a linked account
         from helper import accounts
         return accounts.run_undo(undo, ctx.home)
@@ -374,3 +378,20 @@ def private_propose(ctx: ToolContext, type: str, name: str, summary: str, detail
     if "errors" in res:
         return ToolResult(False, "Not added: " + "; ".join(res["errors"]), "private")
     return ToolResult(True, "; ".join(res["notes"]) + ". It waits for Jack's tap.", "private")
+
+
+@tool
+def remind(ctx: ToolContext, text: str, first_step: str = "", due_date: str = "") -> ToolResult:
+    """Set a reminder for Jack. first_step = a tiny first action ("Find the number").
+    due_date = YYYY-MM-DD or YYYY-MM-DD HH:MM, or empty for no date."""
+    import datetime as _dt
+    from helper.calm import Reminders
+    due = None
+    if due_date.strip():
+        try:
+            due = _dt.datetime.fromisoformat(due_date.strip()).timestamp()
+        except ValueError:
+            return ToolResult(False, "due_date must look like 2026-11-05 or 2026-11-05 14:00", "local")
+    r = Reminders(ctx.home / "state").add(text, first_step, due, source="agent")
+    return ToolResult(True, f"Reminder set: {r['text']} (first step: {r['first_step']})", "local",
+                      undo={"kind": "reminder", "id": r["id"]})

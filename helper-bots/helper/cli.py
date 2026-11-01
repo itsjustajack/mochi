@@ -157,7 +157,7 @@ def cmd_serve(home: Home, args) -> int:
     if link_cfg.get("enabled"):
         lport = int(link_cfg.get("port", DEFAULT_PORT))
         try:
-            lhttpd = serve_link(LinkApp(registry, runner, agents, settings, __version__),
+            lhttpd = serve_link(LinkApp(registry, runner, agents, settings, __version__, pc_app=app),
                                 str(link_cfg.get("host", "")), lport)
         except (ValueError, OSError) as e:
             print(f"Stub Link is off: {e}")

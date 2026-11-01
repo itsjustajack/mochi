@@ -75,7 +75,7 @@ class App:
 
     # ------------------------------------------------------------ API
 
-    def handle(self, method: str, path: str, body: dict | None) -> tuple[int, dict]:
+    def handle(self, method: str, path: str, body: dict | None, by: str = "ui:pc") -> tuple[int, dict]:
         gate = self.runner.gate
         default = self.settings.get("general", {}).get("default_agent", "organizer")
         if method == "GET" and path == "/v1/status":
@@ -112,14 +112,14 @@ class App:
             verdict = str((body or {}).get("verdict", ""))
             if verdict not in ("approve", "always", "deny", "stop"):
                 return 400, {"error": "verdict must be approve, always, deny or stop"}
-            a = gate.approvals.resolve(path.rsplit("/", 1)[1], verdict, by="ui:web")
+            a = gate.approvals.resolve(path.rsplit("/", 1)[1], verdict, by=by)
             return (200, a.public()) if a else (404, {"error": "no pending approval with that id"})
         if method == "POST" and path == "/v1/stop":
-            self.runner.stop_all(by="ui:web")
+            self.runner.stop_all(by=by)
             return 200, {"stopped": True}
         if method == "POST" and path == "/v1/start":
             gate.kill.start()
-            self.runner.audit.write("system", event="start", by="ui:web")
+            self.runner.audit.write("system", event="start", by=by)
             return 200, {"stopped": False}
         if method == "POST" and path == "/v1/code/check":
             from helper import codecheck
@@ -141,7 +141,7 @@ class App:
                     res = knowledge.set_mode(state, self.runner.policy, str((body or {}).get("mode", "")))
                 except ValueError as e:
                     return 400, {"error": str(e)}
-                self.runner.audit.write("system", event="content_mode", mode=res["mode"], by="ui:web")
+                self.runner.audit.write("system", event="content_mode", mode=res["mode"], by=by)
                 return 200, res
         if method == "GET" and path == "/v1/rules":
             from helper import knowledge
@@ -149,7 +149,9 @@ class App:
             return 200, {"rules": knowledge.rules_status(pol.rule_docs, self.runner.home_root / "state"),
                          "knowledge": [str(k) for k in pol.knowledge]}
         if path.startswith("/v1/checklists") or path.startswith("/v1/done"):
-            return self.handle_checklists(method, path, body or {}, by="ui:pc")
+            return self.handle_checklists(method, path, body or {}, by=by)
+        if path.split("/")[2] in ("today", "calm", "reminders", "capture"):
+            return self.handle_today(method, path, body or {}, by)
         if path.startswith("/v1/ledger"):
             return self.handle_ledger(method, path, body or {})
         if path.startswith("/v1/private"):
@@ -158,6 +160,77 @@ class App:
             return self.handle_link(method, path)
         if method == "GET" and path == "/v1/activity":
             return 200, {"events": self.runner.audit.tail(200)}
+        return 404, {"error": "not found"}
+
+    def handle_today(self, method: str, path: str, body: dict, by: str) -> tuple[int, dict]:
+        """Needs you, Just one thing, Too much, quiet hours, reminders and the brain dump."""
+        import datetime as dt
+        from helper.calm import SNOOZES, Calm, Reminders, needs_you, one_thing
+        from helper.capture import CaptureStore
+        state = self.runner.home_root / "state"
+        calm, rem, cap = Calm(state), Reminders(state), CaptureStore(state)
+        parts = [p for p in path.split("/") if p]
+        if method == "GET" and parts == ["v1", "today"]:
+            rem.roll_missed()
+            view = needs_you(rem, calm, [a.public() for a in self.runner.gate.approvals.pending()],
+                             len(cap.list("new")), at_pc=by.startswith("ui:"))
+            return 200, {**view, "one_thing": one_thing(view), "calm": calm.get()}
+        if parts == ["v1", "calm"]:
+            if method == "GET":
+                return 200, calm.get()
+            try:
+                res = calm.set(**body)
+            except (ValueError, TypeError) as e:
+                return 400, {"error": str(e)}
+            self.runner.audit.write("system", event="calm", changes=sorted(body), by=by)
+            return 200, res
+        if parts[1] == "reminders":
+            if method == "GET" and len(parts) == 2:
+                return 200, {"reminders": rem.list("open"), "snoozes": list(SNOOZES)}
+            if method == "POST" and len(parts) == 2:
+                due = body.get("due")
+                try:
+                    r = rem.add(str(body.get("text", "")), str(body.get("first_step", "")),
+                                float(due) if due else None, source=by, urgent=bool(body.get("urgent")))
+                except ValueError as e:
+                    return 400, {"error": str(e)}
+                return 201, r
+            if method == "POST" and len(parts) == 4 and parts[3] in ("done", "drop", "snooze"):
+                try:
+                    if parts[3] == "done":
+                        r = rem.done(parts[2])
+                        calm.add_xp(10)
+                    elif parts[3] == "drop":
+                        r = rem.drop(parts[2])
+                    else:
+                        r = rem.snooze(parts[2], str(body.get("choice", "")), dt.datetime.now())
+                except KeyError:
+                    return 404, {"error": "no such reminder"}
+                except ValueError as e:
+                    return 400, {"error": str(e)}
+                return 200, r
+        if parts[1] == "capture":
+            if method == "GET" and len(parts) == 2:
+                return 200, {"notes": cap.list("new")}
+            if method == "POST" and len(parts) == 2:
+                try:
+                    return 201, cap.add(str(body.get("text", "")), source=by)
+                except ValueError as e:
+                    return 400, {"error": str(e)}
+            if method == "POST" and len(parts) == 4 and parts[3] == "sort":
+                note = next((n for n in cap.list() if n["id"] == parts[2]), None)
+                if note is None:
+                    return 404, {"error": "no such note"}
+                picked = body.get("keep", [])
+                if not isinstance(picked, list) or not all(isinstance(i, int) for i in picked):
+                    return 400, {"error": "keep must be a list of item numbers"}
+                made = []
+                for i in picked:
+                    if 0 <= i < len(note["items"]):
+                        it = note["items"][i]
+                        made.append(rem.add(it["text"], it.get("first_step", ""), source="brain dump"))
+                cap.mark(note["id"], "sorted")
+                return 200, {"reminders": made}
         return 404, {"error": "not found"}
 
     def handle_checklists(self, method: str, path: str, body: dict, by: str) -> tuple[int, dict]:
