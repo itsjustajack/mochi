@@ -1,4 +1,4 @@
-name: Helper (tests and phone app)
+name: Helper (tests, Windows app, phone app)
 
 on:
   push:
@@ -73,4 +73,34 @@ jobs:
         with:
           name: Helper-phone
           path: Helper.apk
+          retention-days: 30
+
+  windows:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check the engine starts on Windows
+        working-directory: helper-bots
+        shell: pwsh
+        run: |
+          $env:HELPER_HOME = "$env:RUNNER_TEMP\helper-home"
+          $env:HELPER_SECRETS_IN_FILES = "1"
+          python -c "from helper.desktop.engine import Engine; e = Engine(start_servers=False); print(len(e.agents), 'agents', e.call('GET', '/v1/today')[0])"
+          python -m unittest tests.test_desktop tests.test_checklist tests.test_calm -v
+      - name: Build Helper.exe
+        working-directory: helper-bots
+        run: |
+          python -m pip install --disable-pip-version-check "pyinstaller==6.*"
+          python scripts/make_icon.py build
+          pyinstaller --noconfirm --onefile --windowed --name Helper --icon build/helper.ico --add-data "build/helper.ico;." --add-data "helper/defaults;helper/defaults" --add-data "helper/skills/originals;helper/skills/originals" --collect-submodules helper helper/desktop/__main__.py
+      # Kept as a download on this run's page (Actions > this run > Artifacts). No GitHub release.
+      # To update: close Helper, replace Helper.exe with the new one. Your settings stay in C:\BotWork\.helper.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Helper-windows
+          path: helper-bots/dist/Helper.exe
           retention-days: 30

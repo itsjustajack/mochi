@@ -51,10 +51,11 @@ class ServerTests(unittest.TestCase):
 
     def test_wrong_host_refused(self):
         self.assertEqual(self.req("GET", "/v1/status", host="evil.example")[0], 421)
-        self.assertEqual(self.req("GET", "/", host="evil.example")[0], 421)
+        self.assertEqual(self.req("GET", "/v1/agents", host="evil.example")[0], 421)
 
     def test_no_cors_and_security_headers(self):
-        code, headers, _ = self.req("GET", "/")
+        self.assertEqual(self.req("GET", "/")[0], 404, "no web pages")
+        code, headers, _ = self.req("GET", "/v1/status")
         self.assertEqual(code, 200)
         self.assertNotIn("Access-Control-Allow-Origin", headers)
         self.assertIn("script-src 'self'", headers["Content-Security-Policy"])

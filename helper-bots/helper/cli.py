@@ -1,7 +1,8 @@
 """The `helper` command.
 
   helper init              set up ~/.helper (policy, settings, agents, key) and approve the policy
-  helper serve             run helperd: the web app and API on 127.0.0.1:8765
+  helper serve             run the engine without a window (the API on 127.0.0.1:8765 and the phone link)
+  helper-app               open the Windows app (Helper.exe is this, packed into one file)
   helper ask "goal"        run one task in this terminal; approvals are asked here
   helper stop | start      kill switch for a running helperd
   helper policy approve    approve the current policy files after you edit them by hand
@@ -170,8 +171,7 @@ def cmd_serve(home: Home, args) -> int:
             link_cfg["running"] = True
             audit.write("system", event="link_serve", port=lport)
             print(f"Stub Link for your phone on {link_cfg.get('host')}:{lport} (home Wi-Fi only)")
-    print(f"helperd {__version__} on http://127.0.0.1:{port}")
-    print(f"Open this once to sign the app in (keep it private):\n  http://127.0.0.1:{port}/#key={token}")
+    print(f"helperd {__version__}: API on 127.0.0.1:{port} (no window; open Helper.exe for the app)")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

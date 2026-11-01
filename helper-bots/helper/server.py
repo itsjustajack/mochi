@@ -1,4 +1,4 @@
-"""helperd's local web app and API on 127.0.0.1:8765.
+"""helperd's local API on 127.0.0.1:8765 (no web pages: the screens are the Windows and phone apps).
 
 Security rules (learned from the Stub / Muse teardown):
 - Every /v1 route needs the bearer token, including from 127.0.0.1. Compared in constant time.
@@ -23,9 +23,6 @@ from urllib.parse import urlparse
 
 from helper.loop import Runner, pick_agent
 
-WEB = Path(__file__).parent / "web"
-STATIC = {"/": "index.html", "/app.css": "app.css", "/app.js": "app.js", "/icon.svg": "icon.svg",
-          "/manifest.webmanifest": "manifest.webmanifest"}
 MAX_BODY = 64 * 1024
 HEADERS = {
     "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
@@ -452,12 +449,6 @@ def make_handler(app: App):
             if not self._guard():
                 return
             path = urlparse(self.path).path
-            if path in STATIC:
-                f = WEB / STATIC[path]
-                ctype = mimetypes.guess_type(f.name)[0] or "application/octet-stream"
-                if f.suffix == ".webmanifest":
-                    ctype = "application/manifest+json"
-                return self._send(200, f.read_bytes(), ctype + ("; charset=utf-8" if ctype.startswith("text") else ""))
             if not path.startswith("/v1/"):
                 return self._json(404, {"error": "not found"})
             if self._authed():
