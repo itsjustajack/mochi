@@ -292,9 +292,9 @@ def check_code(ctx: ToolContext, path: WorkPath, language: str = "") -> ToolResu
     return ToolResult(True, _json.dumps(res, ensure_ascii=False), f"file:{_rel(ctx, p)}")
 
 
-def _ledger(ctx: ToolContext):
+def _ledger(ctx: ToolContext, section: str = "lore"):
     from helper.ledger import LedgerStore
-    return LedgerStore(ctx.home / "state" / "lore_ledger.json")
+    return LedgerStore.for_home(ctx.home, section)
 
 
 @tool
@@ -348,3 +348,29 @@ def knowledge_read(ctx: ToolContext, path: str, max_chars: int = 20000) -> ToolR
         return ToolResult(False, "That's a Google Docs shortcut with no text. Save it as .txt in Drive to read it.", "local")
     text = p.read_text(encoding="utf-8", errors="replace")
     return ToolResult(True, text[:max(1, min(max_chars, 60000))], f"drive:{p.name}")
+
+
+@tool
+def private_search(ctx: ToolContext, query: str = "", status: str = "") -> ToolResult:
+    """Search Jack's private records (accounts, people, documents, routines). Never in stories."""
+    import json as _json
+    rows = _ledger(ctx, "private").search(query, status)
+    if not rows:
+        return ToolResult(True, "no private record matches", "private")
+    return ToolResult(True, _json.dumps(rows, ensure_ascii=False), "private")
+
+
+@tool
+def private_propose(ctx: ToolContext, type: str, name: str, summary: str, details: str = "",
+                    related: str = "", source: str = "agent") -> ToolResult:
+    """Add a DRAFT private record (type: account, person, place, document, routine, date, note).
+    Never write a password, PIN or code: only where it lives (for example "in RoboForm").
+    Jack's tap makes it real. related = comma-separated ids like REC-0001."""
+    rel = [r.strip() for r in related.split(",") if r.strip()]
+    patch = {"reason": f"Draft from {source[:40]}: {name[:80]}",
+             "ops": [{"op": "add", "entry": {"type": type, "name": name, "summary": summary, "details": details,
+                                             "related": rel, "source": source[:40], "status": "draft"}}]}
+    res = _ledger(ctx, "private").apply(patch, approved=False)
+    if "errors" in res:
+        return ToolResult(False, "Not added: " + "; ".join(res["errors"]), "private")
+    return ToolResult(True, "; ".join(res["notes"]) + ". It waits for Jack's tap.", "private")

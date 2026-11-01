@@ -192,6 +192,8 @@ class Gate:
             return Decision("deny", f"unknown or disabled tool: {action}", action)
         if action not in agent.tools:
             return Decision("deny", f"{agent.name} is not set up to use {action}", action, tier)
+        if agent.story and action.startswith("private_"):
+            return Decision("deny", "story agents never see your private records", action, tier)
         # 2. Valid args (paths resolved inside this agent's folders, never protected folders)
         try:
             clean = toolmod.validate_args(spec, args, agent.roots, self.protected)

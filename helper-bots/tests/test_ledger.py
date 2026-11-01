@@ -118,5 +118,51 @@ class StoreAndToolTests(unittest.TestCase):
         self.assertEqual(self.store.load()["entries"][0]["name"], "A")
 
 
+class PrivateSectionTests(unittest.TestCase):
+    def setUp(self):
+        self.env = Env()
+
+    def tearDown(self):
+        self.env.close()
+
+    def test_private_is_separate_and_refuses_secrets(self):
+        priv = LedgerStore.for_home(self.env.home.root, "private")
+        res = priv.apply({"reason": "r", "ops": [{"op": "add", "entry": {
+            "type": "account", "name": "Spotify", "summary": "Music. Password in RoboForm. 2-step off."}}]})
+        self.assertNotIn("errors", res, res.get("errors"))
+        self.assertEqual(priv.load()["entries"][0]["id"], "REC-0001")
+        self.assertEqual(LedgerStore.for_home(self.env.home.root).load()["entries"], [], "lore untouched")
+        bad = priv.apply({"reason": "r", "ops": [{"op": "add", "entry": {
+            "type": "account", "name": "Bank", "summary": "password: hunter22"}}]})
+        self.assertIn("errors", bad)
+        bad = priv.apply({"reason": "r", "ops": [{"op": "add", "entry": {
+            "type": "note", "name": "Card", "summary": "4111 1111 1111 1111"}}]})
+        self.assertIn("errors", bad)
+        self.assertIn("errors", priv.apply({"reason": "r", "ops": [{"op": "add", "entry": {
+            "type": "place", "name": "x", "summary": "y", "id": "LORE-0001"}}]}))
+
+    def test_story_agents_never_see_private(self):
+        t = self.env.task("storyteller")
+        t.agent.tools.append("private_search")
+        d = self.env.gate.check(t, "private_search", {"query": "bank"})
+        self.assertEqual(d.verdict, "deny")
+        self.assertIn("story agents", d.reason)
+
+    def test_quill_files_private_draft_and_jack_approves(self):
+        runner = self.env.runner([
+            {"action": "private_propose", "args": {"type": "account", "name": "Spotify",
+                                                   "summary": "Music subscription; password lives in RoboForm."}},
+            {"action": "done", "args": {"answer": "Filed REC-0001."}},
+        ])
+        t = runner.start("note my Spotify account", self.env.agents["quill"], background=False)
+        self.assertEqual(t.status, "done")
+        app = App(runner, self.env.agents, "k", self.env.settings, port=0)
+        code, res = app.handle("GET", "/v1/private", None)
+        self.assertEqual((code, res["section"]), (200, "private"))
+        self.assertIn("Private records", res["report"])
+        self.assertEqual(app.handle("POST", "/v1/private/REC-0001/promote", {})[0], 200)
+        self.assertEqual(LedgerStore.for_home(self.env.home.root, "private").load()["entries"][0]["status"], "canon")
+
+
 if __name__ == "__main__":
     unittest.main()

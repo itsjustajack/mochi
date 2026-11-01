@@ -152,6 +152,8 @@ class App:
             return self.handle_checklists(method, path, body or {}, by="ui:pc")
         if path.startswith("/v1/ledger"):
             return self.handle_ledger(method, path, body or {})
+        if path.startswith("/v1/private"):
+            return self.handle_ledger(method, path.replace("/v1/private", "/v1/ledger", 1), body or {}, "private")
         if path.startswith("/v1/link"):
             return self.handle_link(method, path)
         if method == "GET" and path == "/v1/activity":
@@ -212,13 +214,15 @@ class App:
             return 200, {"change": entry, "rows": cl.rows(agent)}
         return 404, {"error": "not found"}
 
-    def handle_ledger(self, method: str, path: str, body: dict) -> tuple[int, dict]:
-        """Guild Ledger panel. Promote and retire here are Jack's own clicks, so they count as approval."""
+    def handle_ledger(self, method: str, path: str, body: dict, section: str = "lore") -> tuple[int, dict]:
+        """Guild Ledger panel (lore, or Jack's private records). Promote and retire here are Jack's own
+        clicks, so they count as approval."""
         from helper.ledger import LedgerStore, report
-        store = LedgerStore(self.runner.home_root / "state" / "lore_ledger.json")
+        store = LedgerStore.for_home(self.runner.home_root, section)
         if method == "GET" and path == "/v1/ledger":
             led = store.load()
-            return 200, {"revision": led["revision"], "report": report(led), "entries": led["entries"]}
+            return 200, {"section": section, "revision": led["revision"], "report": report(led, section),
+                         "entries": led["entries"]}
         parts = path.split("/")
         if method == "POST" and len(parts) == 5 and parts[4] in ("promote", "retire"):
             eid = parts[3]
@@ -236,7 +240,7 @@ class App:
             res = store.apply({"reason": reason, "ops": [op]}, approved=True)
             if "errors" in res:
                 return 400, {"error": " ".join(res["errors"])}
-            self.runner.audit.write("system", event="ledger_" + parts[4], entry=eid, by="ui:web")
+            self.runner.audit.write("system", event=f"{section}_" + parts[4], entry=eid, by="ui:pc")
             return 200, {"revision": res["ledger"]["revision"], "notes": res["notes"]}
         return 404, {"error": "not found"}
 
