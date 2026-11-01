@@ -35,14 +35,15 @@ public class SetupActivity extends Activity {
         scroll.addView(box);
         setContentView(scroll);
 
-        box.addView(Ui.text(this, "Link Helper to your PC", 24, Ui.TEXT, true));
-        TextView intro = Ui.text(this, "On the PC, open Helper, then Settings › Phone link. Turn it on, press "
-                + "\"Link a new phone\" and type what it shows here. Your phone and PC need the same Wi-Fi "
-                + "(or Tailscale when you're out).", 15, Ui.MUTED, false);
+        box.addView(Ui.text(this, "Link to your PC (optional)", 24, Ui.TEXT, true));
+        TextView intro = Ui.text(this, "Helper works on this phone by itself. Linking lets the phone use the "
+                + "PC's agents, email and bigger AI instead. Put Tailscale on both, then on the PC open Helper, "
+                + "Settings › Phone link: type the PC's Tailscale address (starts 100.), turn it on, press "
+                + "\"Link a new phone\" and type the address and code here. Press Back to skip.", 15, Ui.MUTED, false);
         intro.setPadding(0, Ui.dp(this, 8), 0, Ui.dp(this, 16));
         box.addView(intro);
 
-        EditText host = field("PC's Wi-Fi address, e.g. 192.168.1.20", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        EditText host = field("PC's address, e.g. 100.101.102.103", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
         host.setText(KeyBox.prefs(this).getString("pc_host", ""));
         EditText code = field("Pairing code", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
         EditText name = field("Name for this phone", InputType.TYPE_CLASS_TEXT);
@@ -117,9 +118,4 @@ public class SetupActivity extends Activity {
         return e;
     }
 
-    @Override
-    public void onBackPressed() {
-        if (Api.from(this) != null) super.onBackPressed();
-        else moveTaskToBack(true);
-    }
 }

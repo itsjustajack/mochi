@@ -5,8 +5,8 @@ is treated as untrusted: it can only *propose* one tool call at a time, and a pe
 plain Python decides whether that call runs, using Jack's own settings, which the bots can't edit.
 
 - **Windows:** `Helper.exe`, a real desktop app with its own icon. No browser page.
-- **Phone:** `Helper.apk`, a normal app with real screens. Nothing to set up in Termux. It talks to
-  the PC over Stub Link (home Wi-Fi, or Tailscale when away).
+- **Phone:** `Helper.apk`, a normal app with real screens that works **on its own**: no PC, no Wi-Fi,
+  nothing to set up in Termux. Linking it to the PC is optional (Stub Link over Tailscale).
 - Standard library Python only. No paid AI, no hosting, no update server: you update by replacing
   the file (`Helper.exe`, or installing the new `Helper.apk` over the old one).
 
@@ -19,10 +19,8 @@ There is no GitHub release page any more.
 - **Windows:** put `Helper.exe` anywhere and open it. The first start makes `C:\BotWork\.helper`
   with the default policy and agents. Install [Ollama](https://ollama.com) and run
   `ollama pull qwen3:8b` once. To update, close Helper and replace `Helper.exe`; your settings stay.
-- **Phone:** install `Helper.apk` (switch Auto Blocker off just for the install). On the PC open
-  Settings › Phone link, type the PC's Wi-Fi address, turn it on, restart Helper, press
-  *Link a new phone*, and type the code in the phone app. Installing a newer APK over the old one
-  keeps everything.
+- **Phone:** install `Helper.apk` (switch Auto Blocker off just for the install) and open it. That's
+  all: it runs by itself. Installing a newer APK over the old one keeps everything.
 
 **Signing key (once).** So each new APK installs over the last one, it's signed with your own key,
 kept as a GitHub secret and never in the repo:
@@ -97,7 +95,25 @@ the phone until you tap *Save to Drive* and pick a Drive folder. Set that folder
 `[capture] folder = "G:/My Drive/Helper/Capture"` in `settings.toml` and the PC picks notes up from
 there. Drive only ever sees scrambled bytes.
 
-## Stub Link (phone to PC)
+## The phone on its own
+
+With no PC linked, the phone runs Helper itself and keeps everything in the app's private storage:
+
+- **Today**: Needs you, Just one thing, Too much, reminders with first steps and snooze.
+- **Note**: brain dump, then tick the real tasks and each becomes a reminder.
+- **Records**: your private records (a password, PIN, code or card number is refused).
+- **Chat with Pip**: "remind me to call the dentist tomorrow", "remember that…", "one thing",
+  "too much", "what's on", "from now on ask me before adding reminders". Free chat with an AI that
+  runs on the phone itself is next.
+- **Settings**: Pip's Do / Ask me / Never rows, presets, Calm mode times, Stop all.
+
+Email, Trello, the Guild agents and the bigger AI need the PC. Link it in Settings › *Link to PC
+(optional)*. While linked, the screens use the PC's Helper instead.
+
+## Stub Link (phone to PC, optional)
+
+Your phone and PC don't need the same Wi-Fi: put Tailscale (free) on both and use the PC's 100.x
+address as the Phone link host.
 
 Pairing uses a one-time code (works once, for 5 minutes, stops after 5 wrong tries). Each phone gets
 its own key; the PC keeps only a hash. A paired phone can do what the PC app does (chat, OK cards,

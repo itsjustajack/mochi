@@ -34,12 +34,13 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * Helper on the phone: real screens, no web page. It talks to Helper on the PC over Stub Link.
+ * Helper on the phone: real screens, no web page. It works on its own (Local): no PC, no Wi-Fi.
+ * Linking the PC is optional; then the same screens use Helper on the PC over Stub Link.
  *
- * Tabs: Chat (the Guild, OK cards), Today (Needs you, Just one thing, Too much, reminders),
- * Note (brain dump, encrypted on the phone, works offline) and Settings (agents' Do / Ask me / Never
- * rows, presets, Calm mode). Stop all is on every screen. Approve and Always ask for a fingerprint
- * or PIN first, and Settings opens with one. No model or tools live here: the PC's gate checks all.
+ * Tabs: Chat (Pip, OK cards), Today (Needs you, Just one thing, Too much, reminders),
+ * Note (brain dump, tick the real tasks), Records (your private records) and Settings (Do / Ask me /
+ * Never rows, presets, Calm mode, link to PC). Stop all is on every screen. Approve and Always ask
+ * for a fingerprint or PIN first, and Settings opens with one.
  */
 public class MainActivity extends Activity {
     private static final int REQ_SAVE_DRIVE = 41;
@@ -94,17 +95,13 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-        if (Api.from(this) == null) {
-            startActivity(new Intent(this, SetupActivity.class));
-            return;
-        }
         if (Build.VERSION.SDK_INT >= 33
                 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 7);
         }
         WatchService.startIfWanted(this);
         loadAgents();
-        io.execute(() -> Notes.sendQueued(this));
+        if (Api.linked(this)) io.execute(() -> Notes.sendQueued(this));
         main.removeCallbacks(poll);
         main.post(poll);
     }
@@ -159,7 +156,7 @@ public class MainActivity extends Activity {
     private View bottomBar() {
         LinearLayout bar = row();
         bar.setBackgroundColor(Ui.RAIL);
-        String[][] tabs = {{"chat", "Chat"}, {"today", "Today"}, {"note", "Note"}, {"settings", "Settings"}};
+        String[][] tabs = {{"chat", "Chat"}, {"today", "Today"}, {"note", "Note"}, {"records", "Records"}, {"settings", "Settings"}};
         for (String[] t : tabs) {
             TextView b = Ui.text(this, t[1], 14, Ui.MUTED, true);
             b.setGravity(Gravity.CENTER);
@@ -228,7 +225,6 @@ public class MainActivity extends Activity {
 
     private void bg(Call call, Done done) {
         Api api = Api.from(this);
-        if (api == null) return;
         io.execute(() -> {
             try {
                 JSONObject res = call.run(api);
@@ -236,8 +232,12 @@ public class MainActivity extends Activity {
             } catch (Api.HttpError e) {
                 toast(e.code == 401 ? "This phone isn't linked any more. Link it again." : e.getMessage());
             } catch (Exception e) {
-                toast("Can't reach the PC right now.");
-                main.post(() -> dot.setTextColor(Ui.BAD));
+                if (api.isLocal()) {
+                    toast("Something went wrong: " + e.getMessage());
+                } else {
+                    toast("Can't reach the PC right now.");
+                    main.post(() -> dot.setTextColor(Ui.BAD));
+                }
             }
         });
     }
@@ -271,6 +271,7 @@ public class MainActivity extends Activity {
             case "chat": drawChat(force); break;
             case "today": if (force) drawToday(); break;
             case "note": if (force) drawNote(); break;
+            case "records": if (force) drawRecords(); break;
             case "settings": if (force) drawSettings(); break;
             default: break;
         }
@@ -524,9 +525,15 @@ public class MainActivity extends Activity {
                     add(btns, Ui.chip(this, "Done", Ui.OK, true)).setOnClickListener(v -> rem(id, "done", ""));
                     add(btns, Ui.chip(this, "Tonight", Ui.LINE, true)).setOnClickListener(v -> rem(id, "snooze", "tonight"));
                     add(btns, Ui.chip(this, "Tomorrow", Ui.LINE, true)).setOnClickListener(v -> rem(id, "snooze", "tomorrow"));
-                    add(btns, Ui.chip(this, "At the PC", Ui.LINE, true)).setOnClickListener(v -> rem(id, "snooze", "at_pc"));
+                    if (Api.linked(this)) {
+                        add(btns, Ui.chip(this, "At the PC", Ui.LINE, true)).setOnClickListener(v -> rem(id, "snooze", "at_pc"));
+                    } else {
+                        add(btns, Ui.chip(this, "1 hour", Ui.LINE, true)).setOnClickListener(v -> rem(id, "snooze", "1h"));
+                    }
                 } else if ("ok".equals(it.optString("kind"))) {
                     add(btns, Ui.chip(this, "Open", Ui.ACCENT, true)).setOnClickListener(v -> openApproval(id));
+                } else if ("capture".equals(it.optString("kind")) && !Api.linked(this)) {
+                    add(btns, Ui.chip(this, "Sort now", Ui.ACCENT, true)).setOnClickListener(v -> show("note"));
                 }
             }
             if (d.optInt("held") > 0) {
@@ -568,6 +575,10 @@ public class MainActivity extends Activity {
     // ------------------------------------------------------------------ Note (brain dump)
 
     private void drawNote() {
+        if (!Api.linked(this)) {
+            drawLocalNote();
+            return;
+        }
         title.setText("Brain dump");
         LinearLayout col = column(null);
         card(col, "Dump everything. Messy is fine. It's locked on this phone before it goes anywhere, "
@@ -672,16 +683,29 @@ public class MainActivity extends Activity {
             TextView c = Ui.text(this, "Calm mode", 18, Ui.TEXT, true);
             c.setPadding(0, Ui.dp(this, 14), 0, Ui.dp(this, 4));
             col.addView(c);
+            boolean linked = Api.linked(this);
             card(col, "Readout " + calm.optString("readout") + " · quiet hours " + calm.optString("quiet_start")
-                    + "–" + calm.optString("quiet_end") + " (change times on the PC)", false);
+                    + "–" + calm.optString("quiet_end") + (linked ? " (change times on the PC)" : ""), false);
             LinearLayout r = row();
             col.addView(r);
             boolean quests = calm.optBoolean("quests");
             add(r, Ui.chip(this, "Quests and XP: " + (quests ? "On" : "Off"), Ui.OK, quests)).setOnClickListener(v ->
                     bg(api -> api.post("/v1/calm", new JSONObject().put("quests", !quests)), x -> drawSettings()));
+            if (!linked) {
+                add(r, Ui.chip(this, "Change times", Ui.LINE, true)).setOnClickListener(v -> editTimes(calm));
+            }
             TextView l = Ui.text(this, "This phone", 18, Ui.TEXT, true);
             l.setPadding(0, Ui.dp(this, 14), 0, Ui.dp(this, 4));
             col.addView(l);
+            if (!linked) {
+                card(col, "Helper is running on this phone by itself. Linking your PC is optional: it adds the "
+                        + "PC's agents, email and bigger AI.", false);
+                LinearLayout r3 = row();
+                col.addView(r3);
+                add(r3, Ui.chip(this, "Link to PC (optional)", Ui.ACCENT, true)).setOnClickListener(v ->
+                        startActivity(new Intent(this, SetupActivity.class)));
+                return;
+            }
             card(col, "Linked to " + KeyBox.prefs(this).getString("pc_host", "?") + " · key " + KeyBox.hint(KeyBox.load(this)), false);
             LinearLayout r2 = row();
             col.addView(r2);
@@ -693,11 +717,13 @@ public class MainActivity extends Activity {
             });
             add(r2, Ui.chip(this, "Unlink this phone", Ui.BAD, true)).setOnClickListener(v ->
                     new android.app.AlertDialog.Builder(this).setTitle("Unlink?")
-                            .setMessage("This phone forgets its key. Remove it on the PC too (Settings › Phone link).")
+                            .setMessage("This phone forgets its key and goes back to running Helper by itself. "
+                                    + "Remove it on the PC too (Settings › Phone link).")
                             .setPositiveButton("Unlink", (dlg, w) -> {
                                 WatchService.stop(this);
                                 KeyBox.clear(this);
-                                startActivity(new Intent(this, SetupActivity.class));
+                                agent = null;
+                                loadAgents();
                             })
                             .setNegativeButton("Cancel", null).show());
         });
@@ -743,6 +769,171 @@ public class MainActivity extends Activity {
                     bg(api -> api.post("/v1/checklists/" + Api.enc(key), new JSONObject().put("not_sure_stop", !ns)),
                             x -> drawAgentRows(key)));
         });
+    }
+
+    private void editTimes(JSONObject calm) {
+        LinearLayout f = new LinearLayout(this);
+        f.setOrientation(LinearLayout.VERTICAL);
+        int p = Ui.dp(this, 20);
+        f.setPadding(p, Ui.dp(this, 8), p, 0);
+        String[][] keys = {{"readout", "Morning readout"}, {"quiet_start", "Quiet from"}, {"quiet_end", "Quiet until"}};
+        EditText[] boxes = new EditText[keys.length];
+        for (int i = 0; i < keys.length; i++) {
+            f.addView(Ui.text(this, keys[i][1], 13, Ui.MUTED, false));
+            boxes[i] = new EditText(this);
+            boxes[i].setText(calm.optString(keys[i][0]));
+            boxes[i].setInputType(InputType.TYPE_CLASS_DATETIME | InputType.TYPE_DATETIME_VARIATION_TIME);
+            f.addView(boxes[i]);
+        }
+        new android.app.AlertDialog.Builder(this).setTitle("Calm mode times").setView(f)
+                .setPositiveButton("Save", (dlg, w) -> {
+                    JSONObject b = new JSONObject();
+                    try {
+                        for (int i = 0; i < keys.length; i++) b.put(keys[i][0], boxes[i].getText().toString().trim());
+                    } catch (Exception ignored) {
+                        return;
+                    }
+                    bg(api -> api.post("/v1/calm", b), x -> drawSettings());
+                })
+                .setNegativeButton("Cancel", null).show();
+    }
+
+    // ------------------------------------------------------------------ Note on the phone by itself
+
+    private void drawLocalNote() {
+        title.setText("Brain dump");
+        bg(api -> api.get("/v1/capture"), d -> {
+            if (!"note".equals(tab)) return;
+            LinearLayout col = column(null);
+            card(col, "Dump everything. Messy is fine. It stays on this phone. Then tick the real tasks "
+                    + "and each one becomes a reminder with a tiny first step.", false);
+            EditText e = new EditText(this);
+            e.setMinLines(6);
+            e.setGravity(Gravity.TOP);
+            e.setTextColor(Ui.TEXT);
+            e.setHintTextColor(Ui.MUTED);
+            e.setHint("call dentist, buy milk, reply to landlord…");
+            e.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+            e.setBackground(Ui.round(this, Ui.PANEL2, 12, 0));
+            int p = Ui.dp(this, 12);
+            e.setPadding(p, p, p, p);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+            lp.topMargin = Ui.dp(this, 10);
+            col.addView(e, lp);
+            LinearLayout btns = row();
+            col.addView(btns);
+            add(btns, Ui.chip(this, "Save", Ui.OK, true)).setOnClickListener(v -> {
+                String text = e.getText().toString().trim();
+                if (text.isEmpty()) return;
+                bg(api -> api.post("/v1/capture", new JSONObject().put("text", text)), r -> drawLocalNote());
+            });
+            JSONArray notes = d.optJSONArray("notes");
+            for (int i = notes == null ? -1 : notes.length() - 1; i >= 0; i--) {
+                JSONObject n = notes.optJSONObject(i);
+                if (n == null || !"new".equals(n.optString("status"))) continue;
+                LinearLayout b = box(col, Ui.ACCENT);
+                card(b, "Tick the real tasks", true);
+                JSONArray items = n.optJSONArray("items");
+                java.util.List<android.widget.CheckBox> ticks = new java.util.ArrayList<>();
+                for (int j = 0; items != null && j < items.length(); j++) {
+                    JSONObject it = items.optJSONObject(j);
+                    android.widget.CheckBox cb = new android.widget.CheckBox(this);
+                    cb.setText(it.optString("text"));
+                    cb.setTextColor(Ui.TEXT);
+                    cb.setChecked("task".equals(it.optString("kind")));
+                    cb.setTag(j);
+                    ticks.add(cb);
+                    b.addView(cb);
+                }
+                if (ticks.isEmpty()) card(b, n.optString("text"), false);
+                LinearLayout nb = row();
+                b.addView(nb);
+                String id = n.optString("id");
+                add(nb, Ui.chip(this, "Make reminders", Ui.OK, true)).setOnClickListener(v -> {
+                    JSONArray keep = new JSONArray();
+                    for (android.widget.CheckBox cb : ticks) if (cb.isChecked()) keep.put((int) cb.getTag());
+                    bg(api -> api.post("/v1/capture/" + Api.enc(id) + "/sort", new JSONObject().put("keep", keep)), r -> {
+                        toast(r.optInt("made") + " reminder" + (r.optInt("made") == 1 ? "" : "s") + " added to Today.");
+                        drawLocalNote();
+                    });
+                });
+                add(nb, Ui.chip(this, "Just keep it", Ui.LINE, true)).setOnClickListener(v ->
+                        bg(api -> api.post("/v1/capture/" + Api.enc(id) + "/sort", new JSONObject().put("keep", new JSONArray())),
+                                r -> drawLocalNote()));
+            }
+        });
+    }
+
+    // ------------------------------------------------------------------ Records
+
+    private void drawRecords() {
+        title.setText("Your records");
+        if (Api.linked(this)) {
+            LinearLayout col = column(null);
+            card(col, "While this phone is linked, your records live in the PC app (Records tab).", false);
+            return;
+        }
+        bg(api -> api.get("/v1/private"), d -> {
+            if (!"records".equals(tab)) return;
+            LinearLayout col = column(null);
+            card(col, "Real-life things to remember: accounts, people, documents, routines, dates. Never a "
+                    + "password, PIN, code or card number, only where it lives (\"in RoboForm\").", false);
+            LinearLayout top = row();
+            col.addView(top);
+            add(top, Ui.chip(this, "+ Add a record", Ui.ACCENT, true)).setOnClickListener(v -> addRecord());
+            JSONArray rs = d.optJSONArray("records");
+            if (rs == null || rs.length() == 0) card(col, "Nothing yet.", false);
+            for (int i = rs == null ? -1 : rs.length() - 1; i >= 0; i--) {
+                JSONObject r = rs.optJSONObject(i);
+                LinearLayout b = box(col, 0);
+                card(b, r.optString("title"), true);
+                card(b, r.optString("type") + " · " + r.optString("id"), false);
+                if (!r.optString("body").isEmpty()) card(b, r.optString("body"), false);
+                String id = r.optString("id");
+                b.setOnLongClickListener(v -> {
+                    new android.app.AlertDialog.Builder(this).setTitle("Remove this record?")
+                            .setPositiveButton("Remove", (dlg, w) ->
+                                    bg(api -> api.post("/v1/private/" + Api.enc(id) + "/remove", null), x -> drawRecords()))
+                            .setNegativeButton("Cancel", null).show();
+                    return true;
+                });
+            }
+            if (rs != null && rs.length() > 0) card(col, "Press and hold a record to remove it.", false);
+        });
+    }
+
+    private void addRecord() {
+        LinearLayout f = new LinearLayout(this);
+        f.setOrientation(LinearLayout.VERTICAL);
+        int p = Ui.dp(this, 20);
+        f.setPadding(p, Ui.dp(this, 8), p, 0);
+        String[] type = {"note"};
+        HorizontalScrollView hs = new HorizontalScrollView(this);
+        LinearLayout types = row();
+        hs.addView(types);
+        java.util.List<Button> chips = new java.util.ArrayList<>();
+        for (String t : Local.RECORD_TYPES) {
+            Button b = Ui.chip(this, t, Ui.ACCENT, t.equals(type[0]));
+            chips.add(b);
+            b.setOnClickListener(v -> {
+                type[0] = t;
+                for (Button c : chips) c.setBackground(Ui.round(this, c == b ? Ui.ACCENT : Ui.LINE, 8, 0));
+            });
+            add(types, b);
+        }
+        f.addView(hs);
+        EditText name = new EditText(this);
+        name.setHint("Name, e.g. Council tax account");
+        f.addView(name);
+        EditText body = new EditText(this);
+        body.setHint("Details, e.g. login is in RoboForm, paid by direct debit");
+        body.setMinLines(3);
+        f.addView(body);
+        new android.app.AlertDialog.Builder(this).setTitle("Add a record").setView(f)
+                .setPositiveButton("Save", (dlg, w) -> bg(api -> api.post("/v1/private/add", new JSONObject()
+                        .put("type", type[0]).put("title", name.getText().toString())
+                        .put("body", body.getText().toString())), x -> drawRecords()))
+                .setNegativeButton("Cancel", null).show();
     }
 
     // ------------------------------------------------------------------ small helpers

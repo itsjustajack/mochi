@@ -76,7 +76,7 @@ public class WatchService extends Service {
     private void loop() {
         while (running) {
             long sleep = 15000;
-            Api api = Api.from(this);
+            Api api = Api.pc(this);
             if (api == null) {
                 stopSelf();
                 return;

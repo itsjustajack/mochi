@@ -13,7 +13,7 @@ android {
         minSdk 30          // Android 11+: biometric-or-PIN prompt for approvals
         targetSdk 34
         versionCode buildNumber
-        versionName "0.1.${buildNumber}"
+        versionName "0.3.${buildNumber}"
     }
 
     // Signed with Jack's own key so every build installs over the last one (sideloaded, not on the

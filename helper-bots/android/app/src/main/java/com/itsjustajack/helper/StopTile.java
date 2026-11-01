@@ -11,7 +11,7 @@ public class StopTile extends TileService {
         Tile t = getQsTile();
         if (t == null) return;
         t.setLabel("Stop Helper");
-        t.setState(Api.from(this) == null ? Tile.STATE_UNAVAILABLE : Tile.STATE_INACTIVE);
+        t.setState(Tile.STATE_INACTIVE);
         t.updateTile();
     }
 
