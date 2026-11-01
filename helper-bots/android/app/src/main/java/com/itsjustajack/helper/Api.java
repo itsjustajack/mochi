@@ -16,7 +16,8 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 
 /**
- * Where the screens get their answers. On its own the phone runs Helper itself (Local): no PC, no
+ * Where the screens get their answers. On its own the phone runs Helper itself (PyEngine, the same
+ * engine as Helper.exe): no PC, no
  * Wi-Fi. When Jack links the PC (optional), the same screens talk to Helper on the PC instead, over
  * Stub Link (home Wi-Fi, or Tailscale when away), with this phone's own key from pairing. Every PC
  * screen route is reached as /v2/app/... Call from a background thread.
@@ -32,7 +33,7 @@ final class Api {
     private final String key;
     private final String host;
     private final int port;
-    private final Local local;
+    private final Context local;
 
     Api(String key, String host, int port) {
         this.key = key;
@@ -41,7 +42,7 @@ final class Api {
         this.local = null;
     }
 
-    private Api(Local local) {
+    private Api(Context local) {
         this.key = null;
         this.host = null;
         this.port = 0;
@@ -51,7 +52,7 @@ final class Api {
     /** Helper on the PC when this phone is linked, otherwise Helper on this phone. Never null. */
     static Api from(Context c) {
         Api pc = pc(c);
-        return pc != null ? pc : new Api(new Local(c));
+        return pc != null ? pc : new Api(c.getApplicationContext());
     }
 
     /** Null unless the phone is linked to the PC. */
@@ -87,12 +88,12 @@ final class Api {
     }
 
     JSONObject get(String path) throws IOException {
-        if (local != null) return local.get(path);
+        if (local != null) return PyEngine.call(local, "GET", path, null);
         return call("GET", map(path), null);
     }
 
     JSONObject post(String path, JSONObject body) throws IOException {
-        if (local != null) return local.post(path, body);
+        if (local != null) return PyEngine.call(local, "POST", path, body == null ? new JSONObject() : body);
         return call("POST", map(path), body == null ? new JSONObject() : body);
     }
 
