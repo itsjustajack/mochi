@@ -35,6 +35,7 @@ class ToolContext:
     roots: list[Path]
     home: Path
     trash: Path
+    knowledge: list[Path] = None  # read-only Drive folders from the policy
 
 
 @dataclass
@@ -232,3 +233,77 @@ def roll_dice(ctx: ToolContext, sides: int = 20, count: int = 1) -> ToolResult:
         return ToolResult(False, "use sides of 2, 4, 6, 8, 10, 12, 20 or 100 and 1 to 20 dice", "local")
     rolls = [random.SystemRandom().randint(1, sides) for _ in range(count)]
     return ToolResult(True, f"{count}d{sides}: {rolls} total {sum(rolls)}", "local")
+
+
+@tool
+def check_code(ctx: ToolContext, path: WorkPath, language: str = "") -> ToolResult:
+    """Check a script for problems (Python, Bash, JavaScript, Janitor ES5, JSON). Reads it; never runs it."""
+    import json as _json
+    from helper import codecheck
+    p = Path(path)
+    if not p.is_file():
+        return ToolResult(False, f"{_rel(ctx, p)} is not a file", "local")
+    code = p.read_text(encoding="utf-8", errors="replace")
+    try:
+        res = codecheck.check(code, language, filename=p.name)
+    except ValueError as e:
+        return ToolResult(False, str(e), "local")
+    return ToolResult(True, _json.dumps(res, ensure_ascii=False), f"file:{_rel(ctx, p)}")
+
+
+def _ledger(ctx: ToolContext):
+    from helper.ledger import LedgerStore
+    return LedgerStore(ctx.home / "state" / "lore_ledger.json")
+
+
+@tool
+def ledger_search(ctx: ToolContext, query: str = "", status: str = "") -> ToolResult:
+    """Search the Guild Ledger (canon and drafts). status can be canon, draft or retired."""
+    import json as _json
+    rows = _ledger(ctx).search(query, status)
+    if not rows:
+        return ToolResult(True, "that isn't in the ledger", "ledger")
+    return ToolResult(True, _json.dumps(rows, ensure_ascii=False), "ledger")
+
+
+@tool
+def ledger_propose(ctx: ToolContext, type: str, name: str, summary: str, details: str = "",
+                   related: str = "", source: str = "agent") -> ToolResult:
+    """Add a DRAFT entry to the Guild Ledger (type: place, character, rule, item, event, term).
+    Only Jack can make it canon. related = comma-separated ids like LORE-0001."""
+    rel = [r.strip() for r in related.split(",") if r.strip()]
+    patch = {"reason": f"Draft from {source[:40]}: {name[:80]}",
+             "ops": [{"op": "add", "entry": {"type": type, "name": name, "summary": summary, "details": details,
+                                             "related": rel, "source": source[:40], "status": "draft"}}]}
+    res = _ledger(ctx).apply(patch, approved=False)
+    if "errors" in res:
+        return ToolResult(False, "Not added: " + "; ".join(res["errors"]), "ledger")
+    return ToolResult(True, "; ".join(res["notes"]) + ". It waits for Jack's approval.", "ledger")
+
+
+@tool
+def knowledge_search(ctx: ToolContext, query: str) -> ToolResult:
+    """Search Jack's linked Drive folders (read-only) for notes that match the words in query."""
+    import json as _json
+    from helper import knowledge
+    roots = ctx.knowledge or []
+    if not roots:
+        return ToolResult(False, "No Drive folders are linked yet.", "local")
+    hits = knowledge.search(roots, query)
+    return ToolResult(True, _json.dumps(hits, ensure_ascii=False) if hits else "nothing found", "drive")
+
+
+@tool
+def knowledge_read(ctx: ToolContext, path: str, max_chars: int = 20000) -> ToolResult:
+    """Read one file from Jack's linked Drive folders (read-only). path as shown by knowledge_search."""
+    from helper import knowledge
+    try:
+        p = knowledge.resolve_knowledge(path, ctx.knowledge or [])
+    except ValueError as e:
+        return ToolResult(False, str(e), "local")
+    if not p.is_file():
+        return ToolResult(False, f"{path} is not a file", "local")
+    if p.suffix.lower() == ".gdoc":
+        return ToolResult(False, "That's a Google Docs shortcut with no text. Save it as .txt in Drive to read it.", "local")
+    text = p.read_text(encoding="utf-8", errors="replace")
+    return ToolResult(True, text[:max(1, min(max_chars, 60000))], f"drive:{p.name}")

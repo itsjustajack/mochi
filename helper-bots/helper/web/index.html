@@ -29,6 +29,7 @@
     <nav class="rail" aria-label="Agents">
       <div id="agents" class="agents"></div>
       <div class="rail-bottom">
+        <button id="link-open" class="stop-all" title="Phone link" aria-label="Phone link">⇄</button>
         <button id="stop-all" class="stop-all" title="Stop all tasks" aria-label="Stop all tasks">■</button>
         <span class="me" title="Jack">J</span>
       </div>
@@ -58,6 +59,26 @@
         <button class="send" type="submit" aria-label="Send">↑</button>
       </form>
     </main>
+
+    <aside id="link-panel" class="link-panel" hidden aria-label="Phone link">
+      <div class="link-head">
+        <h2>Phone link</h2>
+        <button id="link-close" class="icon-btn" aria-label="Close">✕</button>
+      </div>
+      <p id="link-state" class="muted"></p>
+      <h3>Linked devices</h3>
+      <div id="link-devices" class="link-devices"></div>
+      <div class="link-new">
+        <h3>Link a new device</h3>
+        <div id="link-pairing" hidden>
+          <p class="muted">On the phone, open Helper, tap <b>Link to PC</b> and enter this code. It works once, for 5 minutes.</p>
+          <div id="link-code" class="link-code mono"></div>
+          <p id="link-qr" class="muted mono small"></p>
+          <button id="link-cancel" class="btn">Cancel</button>
+        </div>
+        <button id="link-pair" class="btn primary">Make a pairing code</button>
+      </div>
+    </aside>
   </div>
 </body>
 </html>

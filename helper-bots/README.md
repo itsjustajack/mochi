@@ -69,6 +69,53 @@ base64 text) and `HELPER_KEYSTORE_PASSWORD`. Keep `helper.keystore` somewhere sa
 secrets are set, builds use a throwaway key and the build log shows a warning. Each build prints its
 signing fingerprint so you can check it.
 
+## Stub Link (phone to PC)
+
+The private connection between your phone and this PC. It is off until you turn it on.
+
+1. In `settings.toml`, set `[link] enabled = true` and `host` to this PC's home Wi-Fi address
+   (for example `192.168.1.20`). It never listens on every address.
+2. Run `helper serve`, open the app, press the ⇄ button, then **Make a pairing code**.
+3. The phone sends that code once to `POST /v2/pair` and gets its own key. The code works once,
+   for 5 minutes, and stops after 5 wrong tries. Only a hash of each key is kept on the PC.
+4. Remove a device from the same panel at any time; its key stops working at once.
+
+A linked device can only: check the PC is awake (`GET /v2/health`), send a job (`POST /v2/jobs`),
+follow its own jobs (`GET /v2/jobs/{id}`) and see how many approvals are waiting (`GET /v2/approvals`).
+It can't approve, stop, change settings or see keys. Those stay on the PC.
+
+Not yet: drawing the QR code (the panel shows the code and the QR data), the phone's Link to PC
+screen, Ledger sync, the Drive fallback, and an encrypted (TLS) connection. Until TLS lands, use it
+on your own home Wi-Fi only.
+
+## Skills in this version
+
+- **Code check** (Jace): finds problems in Python, Bash, JavaScript, Janitor ES5 scripts and JSON and
+  explains them in plain English. It never runs the code. Tool `check_code`, API `POST /v1/code/check`.
+- **Deep research** (Deep Research agent): Jack's Deep Tactical Research Agent, v3.2 and v3.3 merged.
+  Ask a question to get a plan, say "go" for the cited report, "quick" for a short answer,
+  "go deeper on angle 2" or "show notes" to follow up.
+- **Guild Ledger** (Quill): the shared store, built to the same rules as Jack's lore_tool.js. Agents
+  add drafts; only Jack's click makes canon (`POST /v1/ledger/<id>/promote`).
+
+## Google Drive, rules and the content switch
+
+1. Install **Google Drive for desktop** (free). Drive appears as a folder, for example `G:\My Drive`.
+2. In `policy/allowlist.toml` list the folders agents may read, and the docs that are their rules:
+   `knowledge = ["G:/My Drive/Helper"]` and
+   `rule_docs = ["G:/My Drive/Helper/Guild_Prompt.txt"]`, then run `helper policy approve`.
+3. Agents with `knowledge_search` / `knowledge_read` can search and read those folders, never write.
+   What they learn is filed as a Ledger draft for your tap.
+4. Rule docs are snapshotted when you approve. If one changes in Drive, agents keep the approved copy
+   until you approve again. A doc that tells agents to drop their rules can't be approved.
+5. The content switch: `policy/content.toml` `adult_content = "switch"` lets you turn on
+   Unfiltered 18+ from the app (`POST /v1/content {"mode": "unfiltered"}`); it goes back to Filtered
+   after `unfiltered_minutes`. Agents with `always_filtered = true` ignore it. Two limits hold in every
+   mode: no sexual content involving minors or anyone childlike, and none about real people.
+
+Google Docs files show up in Drive for desktop as `.gdoc` shortcuts with no text. Save notes you want
+Helper to read as `.txt` or `.md`.
+
 ## Not in this version yet
 
 Memory (SQLite), skills and the sandbox, more widgets (Ask bar, Quick actions, Profile), Windows tray and

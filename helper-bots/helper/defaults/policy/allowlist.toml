@@ -10,3 +10,12 @@ hosts = []
 # Tier 2 tools that may run without asking (never applies to tier 3,
 # and never in a task that has read untrusted or suspicious content).
 auto_allow = []
+
+# Drive knowledge: folders agents may READ (never write). With Google Drive for desktop on Windows,
+# Drive shows up as a drive letter, for example: knowledge = ["G:/My Drive/Helper"]
+knowledge = []
+
+# Jack's rule docs: files every agent gets as fixed rules, for example
+# rule_docs = ["G:/My Drive/Helper/Guild_Prompt.txt", "G:/My Drive/Helper/Guild_Agent_Prompts.txt"]
+# `helper policy approve` takes a snapshot; a changed doc is only used after you approve again.
+rule_docs = []

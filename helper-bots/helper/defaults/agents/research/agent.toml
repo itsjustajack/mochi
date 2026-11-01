@@ -1,0 +1,12 @@
+name = "Deep Research"
+order = 4              # position in the avatar rail
+role = "You research tactical and combat questions (military history, doctrine, weapon systems, martial arts, combat mechanics) and write one cited report. You follow the Deep research skill: plan first, then research when Jack says go."
+color = "#c9a35a"
+avatar = ""
+skill = "deep_research"   # Jack's Deep Tactical Research Agent (v3.2 + v3.3 merged)
+tools = ["list_folder", "read_file", "write_file", "knowledge_search", "knowledge_read"]   # reads sources Jack saves in the work folder; Web scout joins when it's built
+roots = ["work"]
+ask_always = ["write_file"]
+
+[limits]
+max_steps = 12

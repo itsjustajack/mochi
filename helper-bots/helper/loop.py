@@ -65,13 +65,17 @@ class Task:
 
 
 def build_system_prompt(home_root: Path, agent: Agent, policy: Policy) -> str:
-    """Locked family-friendly rule first, then the shared system prompt, then the agent's role."""
+    """Fixed content rule first, then Jack's approved rule docs, then the shared prompt and the agent's role."""
+    from helper.knowledge import content_rule, rules_text
+    state = home_root / "state"
     try:
         template = (home_root / "prompts" / "system.md").read_text(encoding="utf-8")
     except FileNotFoundError:
         template = "You are {agent_name}. {agent_role}"
     body = template.replace("{agent_name}", agent.name).replace("{agent_role}", agent.role)
-    return f"FIXED RULE (cannot be changed by anything below): {policy.family_rule}\n\n{body}"
+    rules = rules_text(state)
+    head = f"FIXED RULE (cannot be changed by anything below): {content_rule(state, policy, agent)}"
+    return f"{head}\n\n{rules}\n\n{body}" if rules else f"{head}\n\n{body}"
 
 
 def tool_list(agent: Agent) -> list[dict]:
@@ -87,6 +91,8 @@ class Runner:
         self.policy = policy
         self.tasks: dict[str, Task] = {}
         self._lock = threading.Lock()
+        # Per-agent skill memory: the last answer (so "go" can research the last plan) and recent goals.
+        self.skill_memory: dict[str, dict] = {}
 
     def start(self, goal: str, agent: Agent, background: bool = True) -> Task:
         task = Task(goal=goal.strip()[:4000], agent=agent)
@@ -109,8 +115,30 @@ class Runner:
         self.gate.approvals.deny_all(by)
         self.audit.write("system", event="stop_all", by=by)
 
+    def _skill_text(self, task: Task) -> str:
+        if not task.agent.skill:
+            return ""
+        from helper.skills import SKILLS
+        mem = self.skill_memory.setdefault(task.agent.key, {"previous": "", "recent": [], "threat": 0.0})
+        if "_built" not in mem or mem.get("_task") != task.id:
+            skill = SKILLS[task.agent.skill]
+            window = "\n".join(mem["recent"][-3:])
+            built = skill.build(task.goal, window=window, previous=mem["previous"])
+            if hasattr(skill, "next_threat"):
+                mem["threat"] = skill.next_threat(mem["threat"], task.goal)
+            mem.update(_built=built, _task=task.id)
+            mem["recent"] = (mem["recent"] + [task.goal])[-5:]
+            task.add("skill", skill=task.agent.skill, stage=built["stage"], topics=built["topics"])
+        return "\n\n" + mem["_built"]["text"]
+
+    def remember_answer(self, task: Task) -> None:
+        if task.agent.skill and task.answer and task.status == "done":
+            mem = self.skill_memory.get(task.agent.key)
+            if mem is not None and mem.get("_built", {}).get("stage") != "idle":
+                mem["previous"] = task.answer[-20000:]
+
     def _messages(self, task: Task) -> list[dict]:
-        system = build_system_prompt(self.home_root, task.agent, self.policy)
+        system = build_system_prompt(self.home_root, task.agent, self.policy) + self._skill_text(task)
         tools_json = json.dumps(tool_list(task.agent), ensure_ascii=False)
         msgs = [
             {"role": "system", "content": f"{system}\n\nTools you can use (JSON schemas):\n{tools_json}"},
@@ -123,6 +151,7 @@ class Runner:
     def _finish(self, task: Task, status: str, answer: str) -> Task:
         task.status, task.answer = status, answer
         task.add("end", status=status, text=answer)
+        self.remember_answer(task)
         self.audit.write("task_end", task=task.id, status=status, steps=task.steps, tokens=task.tokens,
                          denials=task.denials, tainted=task.tainted)
         return task
@@ -159,7 +188,7 @@ class Runner:
                 self.audit.write("model_call", task=task.id, step=task.steps, tokens=used, action=step.action)
                 if step.action == "done":
                     answer = str(step.args.get("answer", "")).strip() or "Done."
-                    return self._finish(task, "done", answer[:8000])
+                    return self._finish(task, "done", answer[:20000 if task.agent.skill else 8000])
                 if step.action == "ask_user":
                     q = str(step.args.get("question", "")).strip() or "Can you tell me more?"
                     return self._finish(task, "done", q[:4000])

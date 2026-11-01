@@ -139,6 +139,9 @@ class Policy:
     adult_content: str
     family_rule: str
     digest: str
+    knowledge: list[Path] = field(default_factory=list)   # read-only Drive folders
+    rule_docs: list[Path] = field(default_factory=list)   # Jack's rule docs (snapshotted on approve)
+    unfiltered_minutes: int = 120
 
     def tier(self, tool: str) -> int | None:
         if tool in self.disabled:
@@ -169,9 +172,20 @@ def load_policy(home: Home) -> Policy:
     for r in allow.get("roots", []):
         p = Path(r).expanduser()
         roots.append((p if p.is_absolute() else home.root / p).resolve())
-    if content.get("adult_content", "never") != "never":
-        # The family-friendly rule is fixed. A policy that tries to turn it off is refused outright.
-        raise ConfigError("content.toml: adult_content can only be \"never\".")
+    adult = content.get("adult_content", "never")
+    if adult not in ("never", "switch"):
+        # "never" locks Filtered; "switch" lets Jack turn on Unfiltered 18+ from the app. Nothing else.
+        raise ConfigError("content.toml: adult_content must be \"never\" or \"switch\".")
+    minutes = content.get("unfiltered_minutes", 120)
+    if not isinstance(minutes, int) or isinstance(minutes, bool) or not 1 <= minutes <= 24 * 60:
+        raise ConfigError("content.toml: unfiltered_minutes must be a whole number from 1 to 1440.")
+
+    def _paths(key):
+        out = []
+        for r in allow.get(key, []):
+            p = Path(str(r)).expanduser()
+            out.append((p if p.is_absolute() else home.root / p).resolve())
+        return out
     return Policy(
         limits=dict(tiers.get("limits", {})),
         tiers=tools,
@@ -179,15 +193,23 @@ def load_policy(home: Home) -> Policy:
         roots=roots,
         hosts=list(allow.get("hosts", [])),
         auto_allow=set(allow.get("auto_allow", [])),
-        adult_content="never",
+        adult_content=adult,
         family_rule=content.get("family_rule", "").strip()
         or "Everything you write must be suitable for all ages.",
         digest=policy_digest(home),
+        knowledge=_paths("knowledge"),
+        rule_docs=_paths("rule_docs"),
+        unfiltered_minutes=minutes,
     )
 
 
 def approve_policy(home: Home) -> str:
-    load_policy(home)  # refuse to approve a broken policy
+    policy = load_policy(home)  # refuse to approve a broken policy
+    from helper.knowledge import take_rules_snapshot
+    try:
+        take_rules_snapshot(policy.rule_docs, home.state_dir)  # Jack's rule docs, as approved now
+    except ValueError as e:
+        raise ConfigError(str(e)) from None
     digest = policy_digest(home)
     home.state_dir.mkdir(parents=True, exist_ok=True)
     home.approved_hash_file.write_text(digest)
@@ -220,6 +242,8 @@ class Agent:
     limits: dict
     model: dict
     caps: list[str] = field(default_factory=list)
+    always_filtered: bool = False   # outward agents (social, email) ignore the Unfiltered switch
+    skill: str = ""   # optional prompt skill, e.g. "deep_research" (see helper/skills)
 
     def public(self) -> dict:
         return {
@@ -232,6 +256,7 @@ class Agent:
             "limits": self.limits,
             "model": self.model.get("model"),
             "caps": self.caps,
+            "skill": self.skill,
         }
 
 
@@ -303,6 +328,11 @@ def build_agent(key: str, raw: dict, policy: Policy, settings: dict, home: Home,
         ("task", task_limits or {}),
     )
     model = {**settings.get("model", {}), **raw.get("model", {})}
+    from helper.skills import SKILLS
+    skill = str(raw.get("skill", "") or "")
+    if skill and skill not in SKILLS:
+        caps.append(f"skill {skill}: not installed, left out")
+        skill = ""
     return Agent(
         key=key,
         name=str(raw.get("name", key.title())),
@@ -316,4 +346,6 @@ def build_agent(key: str, raw: dict, policy: Policy, settings: dict, home: Home,
         limits=limits,
         model=model,
         caps=caps + lcaps,
+        skill=skill,
+        always_filtered=bool(raw.get("always_filtered", False)),
     )

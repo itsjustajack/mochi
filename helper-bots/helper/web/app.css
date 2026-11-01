@@ -144,3 +144,20 @@ code, .mono { font-family: var(--mono); font-size: 13px; }
   .btn { min-height: 44px; }
   .signin-card { padding: 24px 16px; }
 }
+
+/* Phone link panel (Stub Link) */
+.app { position: relative; }
+.link-panel { position: absolute; top: 0; right: 0; bottom: 0; width: min(380px, 100%); background: var(--panel);
+  border-left: 1px solid var(--line); padding: 20px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; z-index: 5; }
+.link-head { display: flex; align-items: center; justify-content: space-between; }
+.link-head h2 { margin: 0; font-size: 18px; }
+.link-panel h3 { margin: 8px 0 0; font-size: 13px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+.icon-btn { border: 0; background: transparent; color: var(--muted); font-size: 16px; padding: 6px; }
+.link-devices { display: flex; flex-direction: column; }
+.link-device { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.link-device .t { flex: 1; min-width: 0; }
+.link-device .t div:last-child { font-size: 12px; color: var(--muted); }
+.link-new { display: flex; flex-direction: column; gap: 10px; }
+.link-code { font-size: 28px; letter-spacing: .18em; text-align: center; padding: 14px; border-radius: 14px; background: var(--panel-2); }
+.small { font-size: 11px; word-break: break-all; }
+#link-open { color: var(--text); }

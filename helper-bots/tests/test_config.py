@@ -12,7 +12,7 @@ class ConfigTests(unittest.TestCase):
         self.env.close()
 
     def test_starter_agents_load(self):
-        self.assertEqual(set(self.env.agents), {"organizer", "notes", "storyteller"})
+        self.assertEqual(set(self.env.agents), {"organizer", "notes", "storyteller", "research", "jace", "quill"})
 
     def test_agent_cannot_exceed_policy_limits(self):
         a = build_agent("x", {"tools": ["read_file"], "limits": {"max_steps": 999}},
@@ -38,9 +38,10 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(len(a.roots), 1)
         self.assertEqual(len(a.caps), 2)
 
-    def test_adult_content_cannot_be_enabled(self):
+    def test_adult_content_only_never_or_switch(self):
+        # Jack's 2026-11-01 decision: "switch" (his Unfiltered 18+ toggle) or "never"; nothing else.
         p = self.env.home.policy_dir / "content.toml"
-        p.write_text(p.read_text().replace('adult_content = "never"', 'adult_content = "allowed"'))
+        p.write_text(p.read_text().replace('adult_content = "switch"', 'adult_content = "allowed"'))
         with self.assertRaises(ConfigError):
             load_policy(self.env.home)
         with self.assertRaises(ConfigError):

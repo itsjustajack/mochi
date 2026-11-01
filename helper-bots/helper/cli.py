@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import threading
 import urllib.request
 
 from helper import __version__
@@ -146,9 +147,25 @@ def cmd_serve(home: Home, args) -> int:
     port = int(args.port or srv.get("port", 8765))
     if not policy_is_approved(home, policy):
         print("Warning: policy not approved. Tier 2 and 3 actions will be refused. Run `helper policy approve`.")
-    app = App(runner, agents, token, settings, status_fn=model.status, port=port)
+    from helper.link import DEFAULT_PORT, DeviceRegistry, LinkApp, serve_link
+    link_cfg = dict(settings.get("link", {}))
+    registry = DeviceRegistry(home.state_dir / "link_devices.json")
+    app = App(runner, agents, token, settings, status_fn=model.status, port=port,
+              registry=registry, link_cfg=link_cfg)
     httpd = serve(app, "127.0.0.1", port)
     audit.write("system", event="serve", port=port)
+    if link_cfg.get("enabled"):
+        lport = int(link_cfg.get("port", DEFAULT_PORT))
+        try:
+            lhttpd = serve_link(LinkApp(registry, runner, agents, settings, __version__),
+                                str(link_cfg.get("host", "")), lport)
+        except (ValueError, OSError) as e:
+            print(f"Stub Link is off: {e}")
+        else:
+            threading.Thread(target=lhttpd.serve_forever, daemon=True).start()
+            link_cfg["running"] = True
+            audit.write("system", event="link_serve", port=lport)
+            print(f"Stub Link for your phone on {link_cfg.get('host')}:{lport} (home Wi-Fi only)")
     print(f"helperd {__version__} on http://127.0.0.1:{port}")
     print(f"Open this once to sign the app in (keep it private):\n  http://127.0.0.1:{port}/#key={token}")
     try:
