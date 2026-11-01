@@ -71,6 +71,8 @@ tasks.register('copyEngine', Copy) {
     into "${projectDir}/src/main/python/helper"
 }
 preBuild.dependsOn 'copyEngine'
+// Chaquopy's own tasks read src/main/python, so they must run after the copy.
+tasks.matching { it.name.contains('Python') }.configureEach { dependsOn 'copyEngine' }
 
 // No other libraries: only the Android framework and the Python runtime.
 dependencies {
