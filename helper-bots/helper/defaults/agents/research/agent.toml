@@ -4,7 +4,7 @@ role = "You research tactical and combat questions (military history, doctrine, 
 color = "#c9a35a"
 avatar = ""
 skill = "deep_research"   # Jack's Deep Tactical Research Agent (v3.2 + v3.3 merged)
-tools = ["list_folder", "read_file", "write_file"]   # reads sources Jack saves in the work folder; Web scout joins when it's built
+tools = ["list_folder", "read_file", "write_file", "knowledge_search", "knowledge_read"]   # reads sources Jack saves in the work folder; Web scout joins when it's built
 roots = ["work"]
 ask_always = ["write_file"]
 

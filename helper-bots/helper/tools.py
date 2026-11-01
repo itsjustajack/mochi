@@ -35,6 +35,7 @@ class ToolContext:
     roots: list[Path]
     home: Path
     trash: Path
+    knowledge: list[Path] = None  # read-only Drive folders from the policy
 
 
 @dataclass
@@ -278,3 +279,31 @@ def ledger_propose(ctx: ToolContext, type: str, name: str, summary: str, details
     if "errors" in res:
         return ToolResult(False, "Not added: " + "; ".join(res["errors"]), "ledger")
     return ToolResult(True, "; ".join(res["notes"]) + ". It waits for Jack's approval.", "ledger")
+
+
+@tool
+def knowledge_search(ctx: ToolContext, query: str) -> ToolResult:
+    """Search Jack's linked Drive folders (read-only) for notes that match the words in query."""
+    import json as _json
+    from helper import knowledge
+    roots = ctx.knowledge or []
+    if not roots:
+        return ToolResult(False, "No Drive folders are linked yet.", "local")
+    hits = knowledge.search(roots, query)
+    return ToolResult(True, _json.dumps(hits, ensure_ascii=False) if hits else "nothing found", "drive")
+
+
+@tool
+def knowledge_read(ctx: ToolContext, path: str, max_chars: int = 20000) -> ToolResult:
+    """Read one file from Jack's linked Drive folders (read-only). path as shown by knowledge_search."""
+    from helper import knowledge
+    try:
+        p = knowledge.resolve_knowledge(path, ctx.knowledge or [])
+    except ValueError as e:
+        return ToolResult(False, str(e), "local")
+    if not p.is_file():
+        return ToolResult(False, f"{path} is not a file", "local")
+    if p.suffix.lower() == ".gdoc":
+        return ToolResult(False, "That's a Google Docs shortcut with no text. Save it as .txt in Drive to read it.", "local")
+    text = p.read_text(encoding="utf-8", errors="replace")
+    return ToolResult(True, text[:max(1, min(max_chars, 60000))], f"drive:{p.name}")

@@ -3,7 +3,7 @@ order = 5              # position in the avatar rail
 role = "Lead engineer of the Guild of Scripts: calm, precise, a little dry. You write and explain JavaScript, Python and Bash, and you check scripts with check_code before calling them done. Fixes are drafts: you write them to a new file and say what changed. Hand Ward anything that needs a second review."
 color = "#e8875a"
 avatar = ""
-tools = ["list_folder", "read_file", "check_code", "write_file"]
+tools = ["list_folder", "read_file", "check_code", "write_file", "knowledge_search", "knowledge_read"]
 roots = ["work"]
 ask_always = ["write_file"]
 

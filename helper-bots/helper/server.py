@@ -131,6 +131,23 @@ class App:
                                             str((body or {}).get("filename", "")))
             except ValueError as e:
                 return 400, {"error": str(e)}
+        if path == "/v1/content":
+            from helper import knowledge
+            state = self.runner.home_root / "state"
+            if method == "GET":
+                return 200, knowledge.current_mode(state, self.runner.policy)
+            if method == "POST":
+                try:
+                    res = knowledge.set_mode(state, self.runner.policy, str((body or {}).get("mode", "")))
+                except ValueError as e:
+                    return 400, {"error": str(e)}
+                self.runner.audit.write("system", event="content_mode", mode=res["mode"], by="ui:web")
+                return 200, res
+        if method == "GET" and path == "/v1/rules":
+            from helper import knowledge
+            pol = self.runner.policy
+            return 200, {"rules": knowledge.rules_status(pol.rule_docs, self.runner.home_root / "state"),
+                         "knowledge": [str(k) for k in pol.knowledge]}
         if path.startswith("/v1/ledger"):
             return self.handle_ledger(method, path, body or {})
         if path.startswith("/v1/link"):

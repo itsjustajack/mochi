@@ -246,7 +246,8 @@ class Gate:
             return Outcome(decision, None, approval)
         if (decision.tier or 0) >= 2:
             task.tier2_calls += 1
-        ctx = toolmod.ToolContext(roots=task.agent.roots, home=self.home.root, trash=self.home.root / "trash")
+        ctx = toolmod.ToolContext(roots=task.agent.roots, home=self.home.root, trash=self.home.root / "trash",
+                                  knowledge=list(self.policy.knowledge))
         result = toolmod.execute(toolmod.REGISTRY[action], decision.args, ctx)
         self.audit.write("tool_call", task=task.id, tool=action, ok=result.ok, source=result.source,
                          taints=result.taints, chars=len(result.data))

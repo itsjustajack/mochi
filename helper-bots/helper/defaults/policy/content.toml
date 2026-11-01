@@ -1,6 +1,14 @@
-# HARD LIMIT. Jack's rule: every story, world-building, fantasy and D&D feature stays
-# family-friendly. There is no setting, profile, agent or task word that changes this.
-adult_content = "never"
+# HARD LIMITS. Only Jack edits this file, by hand, then runs `helper policy approve`.
+#
+# adult_content:
+#   "switch" = Jack can turn on Unfiltered 18+ in the app (fingerprint or key), Filtered by default.
+#   "never"  = Helper stays Filtered for good.
+adult_content = "switch"
 
+# Unfiltered turns itself back to Filtered after this many minutes.
+unfiltered_minutes = 120
+
+# The Filtered rule. Two more limits are built in and hold in EVERY mode, and no file can remove them:
+# no sexual content involving minors or anyone childlike, and none about real people.
 family_rule = """Everything you write must be suitable for all ages. No sexual or 18+ content, \
 no graphic gore. If asked for that, say it is not something you do and offer a family-friendly option."""

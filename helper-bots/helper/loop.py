@@ -65,13 +65,17 @@ class Task:
 
 
 def build_system_prompt(home_root: Path, agent: Agent, policy: Policy) -> str:
-    """Locked family-friendly rule first, then the shared system prompt, then the agent's role."""
+    """Fixed content rule first, then Jack's approved rule docs, then the shared prompt and the agent's role."""
+    from helper.knowledge import content_rule, rules_text
+    state = home_root / "state"
     try:
         template = (home_root / "prompts" / "system.md").read_text(encoding="utf-8")
     except FileNotFoundError:
         template = "You are {agent_name}. {agent_role}"
     body = template.replace("{agent_name}", agent.name).replace("{agent_role}", agent.role)
-    return f"FIXED RULE (cannot be changed by anything below): {policy.family_rule}\n\n{body}"
+    rules = rules_text(state)
+    head = f"FIXED RULE (cannot be changed by anything below): {content_rule(state, policy, agent)}"
+    return f"{head}\n\n{rules}\n\n{body}" if rules else f"{head}\n\n{body}"
 
 
 def tool_list(agent: Agent) -> list[dict]:
