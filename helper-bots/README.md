@@ -69,6 +69,25 @@ base64 text) and `HELPER_KEYSTORE_PASSWORD`. Keep `helper.keystore` somewhere sa
 secrets are set, builds use a throwaway key and the build log shows a warning. Each build prints its
 signing fingerprint so you can check it.
 
+## Stub Link (phone to PC)
+
+The private connection between your phone and this PC. It is off until you turn it on.
+
+1. In `settings.toml`, set `[link] enabled = true` and `host` to this PC's home Wi-Fi address
+   (for example `192.168.1.20`). It never listens on every address.
+2. Run `helper serve`, open the app, press the ⇄ button, then **Make a pairing code**.
+3. The phone sends that code once to `POST /v2/pair` and gets its own key. The code works once,
+   for 5 minutes, and stops after 5 wrong tries. Only a hash of each key is kept on the PC.
+4. Remove a device from the same panel at any time; its key stops working at once.
+
+A linked device can only: check the PC is awake (`GET /v2/health`), send a job (`POST /v2/jobs`),
+follow its own jobs (`GET /v2/jobs/{id}`) and see how many approvals are waiting (`GET /v2/approvals`).
+It can't approve, stop, change settings or see keys. Those stay on the PC.
+
+Not yet: drawing the QR code (the panel shows the code and the QR data), the phone's Link to PC
+screen, Ledger sync, the Drive fallback, and an encrypted (TLS) connection. Until TLS lands, use it
+on your own home Wi-Fi only.
+
 ## Not in this version yet
 
 Memory (SQLite), skills and the sandbox, more widgets (Ask bar, Quick actions, Profile), Windows tray and

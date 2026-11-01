@@ -302,6 +302,50 @@ $("stop-all").addEventListener("click", async () => {
   poll();
 });
 
+// ---------------------------------------------------------------- Phone link (Stub Link)
+
+function ago(ts) {
+  if (!ts) return "never";
+  const m = Math.round((Date.now() / 1000 - ts) / 60);
+  return m < 1 ? "just now" : m < 60 ? m + " min ago" : Math.round(m / 60) + " h ago";
+}
+
+async function renderLink() {
+  let info;
+  try { info = await api("GET", "/v1/link"); } catch (e) { $("link-state").textContent = e.message; return; }
+  $("link-state").textContent = info.running
+    ? "On, for home Wi-Fi at " + info.address + "."
+    : info.enabled ? "Turned on in settings, but not running. Check the address in settings.toml."
+    : "Off. Turn it on in settings.toml ([link] enabled = true, host = this PC's Wi-Fi address).";
+  const list = $("link-devices");
+  list.replaceChildren();
+  if (!info.devices.length) list.append(el("p", "muted", "No devices linked yet."));
+  for (const d of info.devices) {
+    const row = el("div", "link-device");
+    const t = el("div", "t");
+    t.append(el("div", "", d.name), el("div", "", "Own key ····" + d.key_hint + " · last seen " + ago(d.last_seen)));
+    const rm = el("button", "btn", "Remove");
+    rm.addEventListener("click", async () => {
+      await api("POST", "/v1/link/devices/" + encodeURIComponent(d.id) + "/remove", {});
+      renderLink();
+    });
+    row.append(t, rm);
+    list.append(row);
+  }
+  const p = info.pairing;
+  $("link-pairing").hidden = !p;
+  $("link-pair").hidden = !!p;
+  if (p) {
+    $("link-code").textContent = p.code.slice(0, 4) + "-" + p.code.slice(4);
+    $("link-qr").textContent = p.qr ? "QR data: " + p.qr : "";
+  }
+}
+
+$("link-open").addEventListener("click", () => { $("link-panel").hidden = false; renderLink(); });
+$("link-close").addEventListener("click", () => { $("link-panel").hidden = true; });
+$("link-pair").addEventListener("click", async () => { await api("POST", "/v1/link/pair", {}); renderLink(); });
+$("link-cancel").addEventListener("click", async () => { await api("POST", "/v1/link/pair/cancel", {}); renderLink(); });
+
 let polling = false;
 async function poll() {
   if (polling || !state.key) return;

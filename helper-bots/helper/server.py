@@ -43,13 +43,15 @@ class App:
     """Everything the HTTP handler needs, so tests can build one without a socket."""
 
     def __init__(self, runner: Runner, agents: dict, token: str, settings: dict,
-                 status_fn=None, port: int = 8765):
+                 status_fn=None, port: int = 8765, registry=None, link_cfg: dict | None = None):
         self.runner = runner
         self.agents = agents
         self.token = token
         self.settings = settings
         self.status_fn = status_fn or (lambda: {"ok": False, "message": "unknown"})
         self.port = port
+        self.registry = registry  # Stub Link devices (helper.link.DeviceRegistry), PC-side admin only
+        self.link_cfg = link_cfg or {}
         self._hits: deque[float] = deque()
         self._hits_lock = threading.Lock()
         self._model_status = {"ok": False, "message": "checking...", "checked": 0.0}
@@ -119,8 +121,42 @@ class App:
             gate.kill.start()
             self.runner.audit.write("system", event="start", by="ui:web")
             return 200, {"stopped": False}
+        if path.startswith("/v1/link"):
+            return self.handle_link(method, path)
         if method == "GET" and path == "/v1/activity":
             return 200, {"events": self.runner.audit.tail(200)}
+        return 404, {"error": "not found"}
+
+    def handle_link(self, method: str, path: str) -> tuple[int, dict]:
+        """Linked devices panel. Only reachable from this PC with the main key."""
+        from helper.link import DEFAULT_PORT, qr_payload
+        if self.registry is None:
+            return 404, {"error": "Stub Link is not set up"}
+        host = str(self.link_cfg.get("host", ""))
+        port = int(self.link_cfg.get("port", DEFAULT_PORT))
+        if method == "GET" and path == "/v1/link":
+            p = self.registry.pairing()
+            pairing = None
+            if p:
+                pairing = {"code": p["code"], "expires": p["expires"],
+                           "qr": qr_payload(host, port, p["code"]) if host else None}
+            return 200, {"enabled": bool(self.link_cfg.get("enabled")), "running": bool(self.link_cfg.get("running")),
+                         "address": f"{host}:{port}" if host else None,
+                         "devices": self.registry.public(), "pairing": pairing}
+        if method == "POST" and path == "/v1/link/pair":
+            p = self.registry.start_pairing()
+            self.runner.audit.write("system", event="link_pair_started", by="ui:web")
+            return 201, {"code": p["code"], "expires": p["expires"],
+                         "qr": qr_payload(host, port, p["code"]) if host else None}
+        if method == "POST" and path == "/v1/link/pair/cancel":
+            self.registry.cancel_pairing()
+            return 200, {"ok": True}
+        if method == "POST" and path.startswith("/v1/link/devices/") and path.endswith("/remove"):
+            dev_id = path.split("/")[4]
+            if not self.registry.remove(dev_id):
+                return 404, {"error": "no such device"}
+            self.runner.audit.write("system", event="link_device_removed", device=dev_id, by="ui:web")
+            return 200, {"removed": dev_id}
         return 404, {"error": "not found"}
 
 
