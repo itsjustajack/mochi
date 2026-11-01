@@ -131,10 +131,40 @@ class App:
                                             str((body or {}).get("filename", "")))
             except ValueError as e:
                 return 400, {"error": str(e)}
+        if path.startswith("/v1/ledger"):
+            return self.handle_ledger(method, path, body or {})
         if path.startswith("/v1/link"):
             return self.handle_link(method, path)
         if method == "GET" and path == "/v1/activity":
             return 200, {"events": self.runner.audit.tail(200)}
+        return 404, {"error": "not found"}
+
+    def handle_ledger(self, method: str, path: str, body: dict) -> tuple[int, dict]:
+        """Guild Ledger panel. Promote and retire here are Jack's own clicks, so they count as approval."""
+        from helper.ledger import LedgerStore, report
+        store = LedgerStore(self.runner.home_root / "state" / "lore_ledger.json")
+        if method == "GET" and path == "/v1/ledger":
+            led = store.load()
+            return 200, {"revision": led["revision"], "report": report(led), "entries": led["entries"]}
+        parts = path.split("/")
+        if method == "POST" and len(parts) == 5 and parts[4] in ("promote", "retire"):
+            eid = parts[3]
+            if parts[4] == "promote":
+                op = {"op": "promote", "id": eid}
+                reason = f"Jack approved {eid}"
+            else:
+                why = str(body.get("reason", "")).strip()
+                if not why:
+                    return 400, {"error": "say why it's being retired"}
+                op = {"op": "retire", "id": eid, "reason": why}
+                if body.get("replaced_by"):
+                    op["replaced_by"] = str(body["replaced_by"])
+                reason = f"Jack retired {eid}: {why}"
+            res = store.apply({"reason": reason, "ops": [op]}, approved=True)
+            if "errors" in res:
+                return 400, {"error": " ".join(res["errors"])}
+            self.runner.audit.write("system", event="ledger_" + parts[4], entry=eid, by="ui:web")
+            return 200, {"revision": res["ledger"]["revision"], "notes": res["notes"]}
         return 404, {"error": "not found"}
 
     def handle_link(self, method: str, path: str) -> tuple[int, dict]:

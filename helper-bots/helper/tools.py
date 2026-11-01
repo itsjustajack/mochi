@@ -248,3 +248,33 @@ def check_code(ctx: ToolContext, path: WorkPath, language: str = "") -> ToolResu
     except ValueError as e:
         return ToolResult(False, str(e), "local")
     return ToolResult(True, _json.dumps(res, ensure_ascii=False), f"file:{_rel(ctx, p)}")
+
+
+def _ledger(ctx: ToolContext):
+    from helper.ledger import LedgerStore
+    return LedgerStore(ctx.home / "state" / "lore_ledger.json")
+
+
+@tool
+def ledger_search(ctx: ToolContext, query: str = "", status: str = "") -> ToolResult:
+    """Search the Guild Ledger (canon and drafts). status can be canon, draft or retired."""
+    import json as _json
+    rows = _ledger(ctx).search(query, status)
+    if not rows:
+        return ToolResult(True, "that isn't in the ledger", "ledger")
+    return ToolResult(True, _json.dumps(rows, ensure_ascii=False), "ledger")
+
+
+@tool
+def ledger_propose(ctx: ToolContext, type: str, name: str, summary: str, details: str = "",
+                   related: str = "", source: str = "agent") -> ToolResult:
+    """Add a DRAFT entry to the Guild Ledger (type: place, character, rule, item, event, term).
+    Only Jack can make it canon. related = comma-separated ids like LORE-0001."""
+    rel = [r.strip() for r in related.split(",") if r.strip()]
+    patch = {"reason": f"Draft from {source[:40]}: {name[:80]}",
+             "ops": [{"op": "add", "entry": {"type": type, "name": name, "summary": summary, "details": details,
+                                             "related": rel, "source": source[:40], "status": "draft"}}]}
+    res = _ledger(ctx).apply(patch, approved=False)
+    if "errors" in res:
+        return ToolResult(False, "Not added: " + "; ".join(res["errors"]), "ledger")
+    return ToolResult(True, "; ".join(res["notes"]) + ". It waits for Jack's approval.", "ledger")
