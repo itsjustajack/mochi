@@ -28,6 +28,7 @@ class ToolResult:
     data: str          # always treated as untrusted by the loop
     source: str        # "local", "file:<path>", "web:<host>"
     taints: bool = False  # True for web pages, downloads, incoming messages
+    undo: dict | None = None  # how to reverse this change, for the Done for you log
 
 
 @dataclass
@@ -132,6 +133,43 @@ def execute(spec: ToolSpec, clean_args: dict, ctx: ToolContext) -> ToolResult:
         return ToolResult(False, f"{type(e).__name__}: {e}", "local")
 
 
+def run_undo(undo: dict, ctx: ToolContext) -> str:
+    """Reverse a file change from the Done for you log. Called only for Jack's Undo tap.
+    The paths were checked by the gate when the change was made; they are checked again here."""
+    kind = undo.get("kind")
+    inside = lambda q: any(q == r or r in q.parents for r in ctx.roots)  # noqa: E731
+    trash = ctx.trash.resolve()
+    p = Path(undo.get("path", "")).resolve()
+    if not inside(p):
+        raise ValueError("that file is no longer in an allowed folder")
+    if kind == "restore":
+        c = Path(undo["copy"]).resolve()
+        if trash not in c.parents or not c.exists():
+            raise ValueError("the saved copy is gone from the trash")
+        if p.exists():
+            _to_trash(ctx, p)
+            shutil.rmtree(p) if p.is_dir() else p.unlink()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(c, p) if c.is_dir() else shutil.copy2(c, p)
+        return f"Put back {p.name}"
+    if kind == "remove":
+        if p.exists():
+            _to_trash(ctx, p)
+            shutil.rmtree(p) if p.is_dir() else p.unlink()
+        return f"Removed {p.name} (a copy is in the trash)"
+    if kind == "move":
+        b = Path(undo["back_to"]).resolve()
+        if not inside(b) or b.exists() or not p.exists():
+            raise ValueError("can't move it back: something is in the way")
+        b.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(p), str(b))
+        return f"Moved {p.name} back"
+    if kind == "call":  # e.g. un-archive an email: a fixed reverse call on a linked account
+        from helper import accounts
+        return accounts.run_undo(undo, ctx.home)
+    raise ValueError("this can't be undone")
+
+
 def _rel(ctx: ToolContext, p: Path) -> str:
     for r in ctx.roots:
         if p == r or r in p.parents:
@@ -192,7 +230,8 @@ def write_file(ctx: ToolContext, path: WorkPath, text: str) -> ToolResult:
     tmp.write_text(text, encoding="utf-8")
     tmp.replace(p)
     note = f" (old version saved to trash/{backup.parent.name})" if backup else ""
-    return ToolResult(True, f"Wrote {len(text)} characters to {_rel(ctx, p)}{note}", "local")
+    undo = {"kind": "restore", "path": str(p), "copy": str(backup)} if backup else {"kind": "remove", "path": str(p)}
+    return ToolResult(True, f"Wrote {len(text)} characters to {_rel(ctx, p)}{note}", "local", undo=undo)
 
 
 @tool
@@ -207,7 +246,8 @@ def move_file(ctx: ToolContext, src: WorkPath, dst: WorkPath) -> ToolResult:
         return ToolResult(False, f"{_rel(ctx, d)} already exists", "local")
     d.parent.mkdir(parents=True, exist_ok=True)
     shutil.move(str(s), str(d))
-    return ToolResult(True, f"Moved {_rel(ctx, s)} to {_rel(ctx, d)}", "local")
+    return ToolResult(True, f"Moved {_rel(ctx, s)} to {_rel(ctx, d)}", "local",
+                      undo={"kind": "move", "path": str(d), "back_to": str(s)})
 
 
 @tool
@@ -223,7 +263,8 @@ def delete_file(ctx: ToolContext, path: WorkPath) -> ToolResult:
         shutil.rmtree(p)
     else:
         p.unlink()
-    return ToolResult(True, f"Deleted {_rel(ctx, p)} (restorable from trash/{dest.parent.name})", "local")
+    return ToolResult(True, f"Deleted {_rel(ctx, p)} (restorable from trash/{dest.parent.name})", "local",
+                      undo={"kind": "restore", "path": str(p), "copy": str(dest)})
 
 
 @tool

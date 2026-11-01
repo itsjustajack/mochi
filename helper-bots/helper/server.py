@@ -110,8 +110,8 @@ class App:
             return 200, {"approvals": [a.public() for a in gate.approvals.pending()]}
         if method == "POST" and path.startswith("/v1/approvals/"):
             verdict = str((body or {}).get("verdict", ""))
-            if verdict not in ("approve", "deny", "stop"):
-                return 400, {"error": "verdict must be approve, deny or stop"}
+            if verdict not in ("approve", "always", "deny", "stop"):
+                return 400, {"error": "verdict must be approve, always, deny or stop"}
             a = gate.approvals.resolve(path.rsplit("/", 1)[1], verdict, by="ui:web")
             return (200, a.public()) if a else (404, {"error": "no pending approval with that id"})
         if method == "POST" and path == "/v1/stop":
@@ -148,12 +148,68 @@ class App:
             pol = self.runner.policy
             return 200, {"rules": knowledge.rules_status(pol.rule_docs, self.runner.home_root / "state"),
                          "knowledge": [str(k) for k in pol.knowledge]}
+        if path.startswith("/v1/checklists") or path.startswith("/v1/done"):
+            return self.handle_checklists(method, path, body or {}, by="ui:pc")
         if path.startswith("/v1/ledger"):
             return self.handle_ledger(method, path, body or {})
         if path.startswith("/v1/link"):
             return self.handle_link(method, path)
         if method == "GET" and path == "/v1/activity":
             return 200, {"events": self.runner.audit.tail(200)}
+        return 404, {"error": "not found"}
+
+    def handle_checklists(self, method: str, path: str, body: dict, by: str) -> tuple[int, dict]:
+        """Settings > Agents: Do / Ask me / Never rows, presets, Not sure? Stop, Undo, Done for you.
+        Reached only with the PC key or a paired phone's key, so every change here is Jack's."""
+        from helper import checklist, tools as toolmod
+        gate = self.runner.gate
+        cl, log = gate.checklists, gate.done_log
+        parts = [p for p in path.split("/") if p]   # v1, checklists, ...
+        if parts[1] == "done":
+            if method == "GET" and len(parts) == 2:
+                return 200, {"done": log.list()}
+            if method == "POST" and len(parts) == 4 and parts[3] == "undo":
+                row = log.take_undo(parts[2])
+                if row is None:
+                    return 404, {"error": "nothing to undo there"}
+                agent = self.agents.get(row["agent"])
+                ctx = toolmod.ToolContext(roots=agent.roots if agent else [], home=self.runner.home_root,
+                                          trash=self.runner.home_root / "trash")
+                try:
+                    text = toolmod.run_undo(row["undo"], ctx)
+                except Exception as e:  # noqa: BLE001 - shown to Jack
+                    return 409, {"error": f"Couldn't undo: {e}"}
+                self.runner.audit.write("system", event="undo", row=row["id"], tool=row["tool"], by=by)
+                return 200, {"undone": row["id"], "text": text}
+            return 404, {"error": "not found"}
+        if method == "GET" and len(parts) == 2:
+            return 200, {"agents": [cl.summary(a) for a in self.agents.values()], "presets": list(checklist.PRESETS),
+                         "history": cl.history(30)}
+        if method == "POST" and len(parts) == 4 and parts[2] == "undo":
+            entry = cl.undo(parts[3], by=by)
+            if entry is None:
+                return 404, {"error": "nothing to undo there"}
+            self.runner.audit.write("system", event="checklist_undo", change=parts[3], by=by)
+            return 200, {"change": entry}
+        agent = self.agents.get(parts[2]) if len(parts) == 3 else None
+        if agent is None:
+            return 404, {"error": "no such agent"}
+        if method == "GET":
+            return 200, {**cl.summary(agent), "rows": cl.rows(agent),
+                         "history": [h for h in cl.history(100) if h["agent"] == agent.key][-20:]}
+        if method == "POST":
+            try:
+                if "preset" in body:
+                    entry = cl.preset(agent, str(body["preset"]), by=by)
+                elif "not_sure_stop" in body:
+                    entry = cl.set_not_sure(agent, bool(body["not_sure_stop"]), by=by)
+                else:
+                    entry = cl.set(agent, str(body.get("job", "")), str(body.get("choice", "")), by=by)
+            except ValueError as e:
+                return 400, {"error": str(e)}
+            self.runner.audit.write("system", event="checklist_change", agent=agent.key, change=entry["id"],
+                                    why=entry["why"], by=by)
+            return 200, {"change": entry, "rows": cl.rows(agent)}
         return 404, {"error": "not found"}
 
     def handle_ledger(self, method: str, path: str, body: dict) -> tuple[int, dict]:

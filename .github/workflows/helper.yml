@@ -1,4 +1,4 @@
-name: Helper (tests, phone app, engine)
+name: Helper (tests and phone app)
 
 on:
   push:
@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   test:
@@ -61,42 +61,16 @@ jobs:
           HELPER_KEYSTORE_PASSWORD: ${{ secrets.HELPER_KEYSTORE_PASSWORD }}
         run: gradle assembleRelease --no-daemon --stacktrace
 
-      - name: Package the APK and the Termux engine
+      - name: Package the APK
         run: |
           cp helper-bots/android/app/build/outputs/apk/release/app-release.apk Helper.apk
-          (cd helper-bots && zip -r ../helper-engine.zip pyproject.toml README.md helper -x '*/__pycache__/*')
-          cp helper-bots/scripts/install-termux.sh install-termux.sh
           keytool -printcert -jarfile Helper.apk | grep -i sha256 | head -1 > signing.txt || true
           cat signing.txt
 
+      # The build is kept as a download on this run's page (Actions > this run > Artifacts) for a few
+      # weeks. There is no GitHub release: Jack installs Helper.apk over the old one from the file.
       - uses: actions/upload-artifact@v4
         with:
           name: Helper-phone
-          path: |
-            Helper.apk
-            helper-engine.zip
-            install-termux.sh
-
-      # A release page is the easiest place to download from on a phone.
-      - name: Publish to the "Helper" release
-        if: github.event_name != 'pull_request'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: helper-latest
-          name: Helper for Android (latest build)
-          target_commitish: ${{ github.sha }}
-          prerelease: true
-          make_latest: false
-          body: |
-            Newest Helper build (app version 0.1.${{ github.run_number }}, from branch ${{ github.ref_name }}).
-
-            On your phone:
-            1. Download **Helper.apk**, **helper-engine.zip** and **install-termux.sh** below.
-            2. In Termux: `termux-setup-storage`, then `cd ~/storage/downloads && bash install-termux*.sh` (the * also matches a renamed download)
-            3. Install Helper.apk (switch Auto Blocker off just for the install), open it and paste the key.
-
-            Installing a newer Helper.apk over the old one keeps your settings.
-          files: |
-            Helper.apk
-            helper-engine.zip
-            install-termux.sh
+          path: Helper.apk
+          retention-days: 30

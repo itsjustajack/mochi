@@ -94,8 +94,9 @@ class Runner:
         # Per-agent skill memory: the last answer (so "go" can research the last plan) and recent goals.
         self.skill_memory: dict[str, dict] = {}
 
-    def start(self, goal: str, agent: Agent, background: bool = True) -> Task:
+    def start(self, goal: str, agent: Agent, background: bool = True, from_jack: bool = True) -> Task:
         task = Task(goal=goal.strip()[:4000], agent=agent)
+        task.from_jack = from_jack
         with self._lock:
             self.tasks[task.id] = task
             # keep memory small: forget old finished tasks
@@ -137,6 +138,24 @@ class Runner:
             if mem is not None and mem.get("_built", {}).get("stage") != "idle":
                 mem["previous"] = task.answer[-20000:]
 
+    def _standing_order(self, task: Task) -> Task | None:
+        """Jack's own "from now on..." message changes the agent's checklist straight away, with Undo.
+        Only Jack's typed words reach here: never email, files, web pages or model output."""
+        from helper import checklist
+        order = checklist.parse_standing_order(task.goal, task.agent)
+        if order is None:
+            return None
+        if "unclear" in order:
+            return self._finish(task, "done", order["unclear"] + " Say it again with the job, or change it in Settings.")
+        entry = self.gate.checklists.set(task.agent, order["job"], order["choice"], by="you (message)",
+                                         why=f"You said: {task.goal[:120]}")
+        self.audit.write("system", event="checklist_change", agent=task.agent.key, job=order["job"],
+                         choice=order["choice"], by="message", change=entry["id"])
+        task.add("checklist", job=order["job"], label=checklist.label(order["job"]), choice=order["choice"],
+                 change=entry["id"])
+        return self._finish(task, "done", f"Done. {task.agent.name} \"{checklist.label(order['job'])}\" is now "
+                                          f"{checklist.CHOICE_WORDS[order['choice']]}. You can undo this.")
+
     def _messages(self, task: Task) -> list[dict]:
         system = build_system_prompt(self.home_root, task.agent, self.policy) + self._skill_text(task)
         tools_json = json.dumps(tool_list(task.agent), ensure_ascii=False)
@@ -169,6 +188,10 @@ class Runner:
             task.add("system", text="Your request looks like it contains instructions aimed at the bot; extra checks are on.")
         self.audit.write("task_start", task=task.id, agent=task.agent.key, goal=task.goal)
         task.add("user", text=task.goal)
+        if getattr(task, "from_jack", False):
+            done = self._standing_order(task)
+            if done is not None:
+                return done
         try:
             while True:
                 if task.cancelled.is_set() or self.gate.kill.stopped:
