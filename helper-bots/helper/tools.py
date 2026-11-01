@@ -232,3 +232,19 @@ def roll_dice(ctx: ToolContext, sides: int = 20, count: int = 1) -> ToolResult:
         return ToolResult(False, "use sides of 2, 4, 6, 8, 10, 12, 20 or 100 and 1 to 20 dice", "local")
     rolls = [random.SystemRandom().randint(1, sides) for _ in range(count)]
     return ToolResult(True, f"{count}d{sides}: {rolls} total {sum(rolls)}", "local")
+
+
+@tool
+def check_code(ctx: ToolContext, path: WorkPath, language: str = "") -> ToolResult:
+    """Check a script for problems (Python, Bash, JavaScript, Janitor ES5, JSON). Reads it; never runs it."""
+    import json as _json
+    from helper import codecheck
+    p = Path(path)
+    if not p.is_file():
+        return ToolResult(False, f"{_rel(ctx, p)} is not a file", "local")
+    code = p.read_text(encoding="utf-8", errors="replace")
+    try:
+        res = codecheck.check(code, language, filename=p.name)
+    except ValueError as e:
+        return ToolResult(False, str(e), "local")
+    return ToolResult(True, _json.dumps(res, ensure_ascii=False), f"file:{_rel(ctx, p)}")

@@ -220,6 +220,7 @@ class Agent:
     limits: dict
     model: dict
     caps: list[str] = field(default_factory=list)
+    skill: str = ""   # optional prompt skill, e.g. "deep_research" (see helper/skills)
 
     def public(self) -> dict:
         return {
@@ -232,6 +233,7 @@ class Agent:
             "limits": self.limits,
             "model": self.model.get("model"),
             "caps": self.caps,
+            "skill": self.skill,
         }
 
 
@@ -303,6 +305,11 @@ def build_agent(key: str, raw: dict, policy: Policy, settings: dict, home: Home,
         ("task", task_limits or {}),
     )
     model = {**settings.get("model", {}), **raw.get("model", {})}
+    from helper.skills import SKILLS
+    skill = str(raw.get("skill", "") or "")
+    if skill and skill not in SKILLS:
+        caps.append(f"skill {skill}: not installed, left out")
+        skill = ""
     return Agent(
         key=key,
         name=str(raw.get("name", key.title())),
@@ -316,4 +323,5 @@ def build_agent(key: str, raw: dict, policy: Policy, settings: dict, home: Home,
         limits=limits,
         model=model,
         caps=caps + lcaps,
+        skill=skill,
     )

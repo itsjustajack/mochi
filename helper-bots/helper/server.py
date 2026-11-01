@@ -121,6 +121,16 @@ class App:
             gate.kill.start()
             self.runner.audit.write("system", event="start", by="ui:web")
             return 200, {"stopped": False}
+        if method == "POST" and path == "/v1/code/check":
+            from helper import codecheck
+            code = str((body or {}).get("code", ""))
+            if not code.strip():
+                return 400, {"error": "paste some code first"}
+            try:
+                return 200, codecheck.check(code, str((body or {}).get("language", "")),
+                                            str((body or {}).get("filename", "")))
+            except ValueError as e:
+                return 400, {"error": str(e)}
         if path.startswith("/v1/link"):
             return self.handle_link(method, path)
         if method == "GET" and path == "/v1/activity":

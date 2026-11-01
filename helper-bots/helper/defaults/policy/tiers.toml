@@ -20,6 +20,7 @@ max_result_chars = 16000  # tool output is cut to this before the model sees it
 list_folder = 0
 read_file = 0
 roll_dice = 0
+check_code = 0        # reads a script and reports problems; never runs it
 write_file = 2
 move_file = 2
 delete_file = 3
