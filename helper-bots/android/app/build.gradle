@@ -1,5 +1,6 @@
 plugins {
     id 'com.android.application'
+    id 'com.chaquo.python'
 }
 
 def buildNumber = (System.getenv('GITHUB_RUN_NUMBER') ?: '1').toInteger()
@@ -13,7 +14,9 @@ android {
         minSdk 30          // Android 11+: biometric-or-PIN prompt for approvals
         targetSdk 34
         versionCode buildNumber
-        versionName "0.3.${buildNumber}"
+        versionName "0.4.${buildNumber}"
+        // 64-bit phones only (Jack's S23 FE), so the download stays as small as it can.
+        ndk { abiFilters 'arm64-v8a' }
     }
 
     // Signed with Jack's own key so every build installs over the last one (sideloaded, not on the
@@ -50,6 +53,25 @@ android {
     }
 }
 
-// No libraries: only the Android framework, so there is nothing third-party inside the app.
+// Helper's engine: the same Python package as the PC (helper-bots/helper), copied into
+// src/main/python by the copyEngine task below. Standard library only, no pip packages.
+chaquopy {
+    defaultConfig {
+        version = "3.12"
+        pyc {
+            src = false
+        }
+    }
+}
+
+tasks.register('copyEngine', Copy) {
+    from("${rootDir}/../helper") {
+        exclude '**/__pycache__/**'
+    }
+    into "${projectDir}/src/main/python/helper"
+}
+preBuild.dependsOn 'copyEngine'
+
+// No other libraries: only the Android framework and the Python runtime.
 dependencies {
 }

@@ -5,8 +5,8 @@ is treated as untrusted: it can only *propose* one tool call at a time, and a pe
 plain Python decides whether that call runs, using Jack's own settings, which the bots can't edit.
 
 - **Windows:** `Helper.exe`, a real desktop app with its own icon. No browser page.
-- **Phone:** `Helper.apk`, a normal app with real screens that works **on its own**: no PC, no Wi-Fi,
-  nothing to set up in Termux. Linking it to the PC is optional (Stub Link over Tailscale).
+- **Phone:** `Helper.apk`, the same app with the same engine and screens, working **on its own**:
+  no PC, no Wi-Fi, nothing to set up in Termux. Linking it to the PC is optional (Tailscale).
 - Standard library Python only. No paid AI, no hosting, no update server: you update by replacing
   the file (`Helper.exe`, or installing the new `Helper.apk` over the old one).
 
@@ -97,18 +97,15 @@ there. Drive only ever sees scrambled bytes.
 
 ## The phone on its own
 
-With no PC linked, the phone runs Helper itself and keeps everything in the app's private storage:
+The phone app is the same app as Helper.exe: it carries the same Python engine (helper/, run inside
+the app by Chaquopy, free and open source) and has the same screens: the Guild avatars down the
+left, then Today, Inbox, Records and Settings, with "Needs your OK" and Stop all at the top. It needs
+no PC and no Wi-Fi. Everything is kept in the app's private storage.
 
-- **Today**: Needs you, Just one thing, Too much, reminders with first steps and snooze.
-- **Note**: brain dump, then tick the real tasks and each becomes a reminder.
-- **Records**: your private records (a password, PIN, code or card number is refused).
-- **Chat with Pip**: "remind me to call the dentist tomorrow", "remember that…", "one thing",
-  "too much", "what's on", "from now on ask me before adding reminders". Free chat with an AI that
-  runs on the phone itself is next.
-- **Settings**: Pip's Do / Ask me / Never rows, presets, Calm mode times, Stop all.
-
-Email, Trello, the Guild agents and the bigger AI need the PC. Link it in Settings › *Link to PC
-(optional)*. While linked, the screens use the PC's Helper instead.
+- Chat needs a model. Free on-phone AI is next; until then the light at the top is red and chat
+  answers that the model isn't ready, the same as the PC without Ollama.
+- If Helper ever closes by itself, the next time it opens it shows what went wrong with a Copy button.
+- Linking the PC is optional (Settings › Link to PC). While linked, the screens use the PC's Helper.
 
 ## Stub Link (phone to PC, optional)
 
