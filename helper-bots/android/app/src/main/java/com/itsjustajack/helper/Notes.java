@@ -71,7 +71,7 @@ final class Notes {
 
     /** Sends every queued note to the PC. Returns how many went. Stops at the first failure. */
     static int sendQueued(Context c) {
-        Api api = Api.from(c);
+        Api api = Api.pc(c);
         if (api == null) return 0;
         int sent = 0;
         for (File f : queued(c)) {

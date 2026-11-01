@@ -16,9 +16,10 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 
 /**
- * Client for Helper on the PC, over Stub Link (home Wi-Fi, or Tailscale when away).
- * The phone has its own device key from pairing. Every PC screen route is reached as
- * /v2/app/... (the PC maps it to the same checks as its own app). Call from a background thread.
+ * Where the screens get their answers. On its own the phone runs Helper itself (Local): no PC, no
+ * Wi-Fi. When Jack links the PC (optional), the same screens talk to Helper on the PC instead, over
+ * Stub Link (home Wi-Fi, or Tailscale when away), with this phone's own key from pairing. Every PC
+ * screen route is reached as /v2/app/... Call from a background thread.
  */
 final class Api {
     static final int DEFAULT_PORT = 8766;
@@ -31,19 +32,42 @@ final class Api {
     private final String key;
     private final String host;
     private final int port;
+    private final Local local;
 
     Api(String key, String host, int port) {
         this.key = key;
         this.host = host;
         this.port = port;
+        this.local = null;
     }
 
-    /** Null until the phone is paired with the PC. */
+    private Api(Local local) {
+        this.key = null;
+        this.host = null;
+        this.port = 0;
+        this.local = local;
+    }
+
+    /** Helper on the PC when this phone is linked, otherwise Helper on this phone. Never null. */
     static Api from(Context c) {
+        Api pc = pc(c);
+        return pc != null ? pc : new Api(new Local(c));
+    }
+
+    /** Null unless the phone is linked to the PC. */
+    static Api pc(Context c) {
         String key = KeyBox.load(c);
         String host = KeyBox.prefs(c).getString("pc_host", null);
         if (key == null || host == null) return null;
         return new Api(key, host, KeyBox.prefs(c).getInt("pc_port", DEFAULT_PORT));
+    }
+
+    static boolean linked(Context c) {
+        return pc(c) != null;
+    }
+
+    boolean isLocal() {
+        return local != null;
     }
 
     /** Pair once with the code shown on the PC. Returns {device_id, key, notes_key}. */
@@ -63,10 +87,12 @@ final class Api {
     }
 
     JSONObject get(String path) throws IOException {
+        if (local != null) return local.get(path);
         return call("GET", map(path), null);
     }
 
     JSONObject post(String path, JSONObject body) throws IOException {
+        if (local != null) return local.post(path, body);
         return call("POST", map(path), body == null ? new JSONObject() : body);
     }
 
@@ -85,6 +111,7 @@ final class Api {
     }
 
     private JSONObject call(String method, String path, JSONObject body) throws IOException {
+        if (local != null) throw new IOException("not linked to a PC");
         URL url = new URL("http", host, port, path);
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         try {
