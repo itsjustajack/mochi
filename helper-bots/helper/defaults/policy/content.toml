@@ -1,0 +1,6 @@
+# HARD LIMIT. Jack's rule: every story, world-building, fantasy and D&D feature stays
+# family-friendly. There is no setting, profile, agent or task word that changes this.
+adult_content = "never"
+
+family_rule = """Everything you write must be suitable for all ages. No sexual or 18+ content, \
+no graphic gore. If asked for that, say it is not something you do and offer a family-friendly option."""

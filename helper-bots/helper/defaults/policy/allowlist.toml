@@ -1,0 +1,12 @@
+# HARD LIMITS. Folders and hosts the bots may ever touch.
+# Relative paths are inside the Helper home folder (~/.helper, or C:\BotWork\.helper).
+# The policy, settings, agents, logs and secret folders are always refused, even if listed.
+
+roots = ["work"]
+
+# Web hosts fetch tools may reach (no fetch tool in v0.1 yet).
+hosts = []
+
+# Tier 2 tools that may run without asking (never applies to tier 3,
+# and never in a task that has read untrusted or suspicious content).
+auto_allow = []

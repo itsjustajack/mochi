@@ -1,0 +1,19 @@
+[project]
+name = "helper-bots"
+version = "0.1.0"
+description = "Helper: free, local helper bots for Windows and Android (Termux) with a code-enforced permission gate."
+requires-python = ">=3.11"
+dependencies = []  # standard library only, so it installs the same way in Termux and on Windows
+
+[project.scripts]
+helper = "helper.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["helper"]
+
+[tool.setuptools.package-data]
+helper = ["web/*", "defaults/**/*"]

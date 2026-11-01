@@ -1,0 +1,55 @@
+plugins {
+    id 'com.android.application'
+}
+
+def buildNumber = (System.getenv('GITHUB_RUN_NUMBER') ?: '1').toInteger()
+
+android {
+    namespace 'com.itsjustajack.helper'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.itsjustajack.helper'
+        minSdk 30          // Android 11+: biometric-or-PIN prompt for approvals
+        targetSdk 34
+        versionCode buildNumber
+        versionName "0.1.${buildNumber}"
+    }
+
+    // Signed with Jack's own key so every build installs over the last one (sideloaded, not on the
+    // Play Store). The key never lives in the repo: CI writes it from the HELPER_KEYSTORE_B64 secret.
+    def ksFile = System.getenv('HELPER_KEYSTORE_FILE')
+    signingConfigs {
+        shared {
+            if (ksFile) {
+                storeFile file(ksFile)
+                storePassword System.getenv('HELPER_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('HELPER_KEY_ALIAS') ?: 'helper'
+                keyPassword System.getenv('HELPER_KEYSTORE_PASSWORD')
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            // Without the secret the build falls back to the debug key (fine for testing, but each
+            // such build has a different key, so it won't install over the previous one).
+            signingConfig ksFile ? signingConfigs.shared : signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    lint {
+        checkReleaseBuilds false
+        abortOnError false
+    }
+}
+
+// No libraries: only the Android framework, so there is nothing third-party inside the app.
+dependencies {
+}

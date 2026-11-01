@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark light">
+  <meta name="theme-color" content="#101412">
+  <title>Helper</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/app.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div id="signin" class="signin" hidden>
+    <div class="signin-card">
+      <div class="brand"><span class="face big"><i></i><i></i></span></div>
+      <h1>Sign in to Helper</h1>
+      <p>Paste the key that <code>helper serve</code> printed, or open the link it printed once.</p>
+      <form id="signin-form">
+        <input id="signin-key" type="password" autocomplete="off" placeholder="Key" aria-label="Key">
+        <button class="btn primary" type="submit">Sign in</button>
+      </form>
+      <p id="signin-error" class="error" role="alert"></p>
+    </div>
+  </div>
+
+  <div id="app" class="app" hidden>
+    <nav class="rail" aria-label="Agents">
+      <div id="agents" class="agents"></div>
+      <div class="rail-bottom">
+        <button id="stop-all" class="stop-all" title="Stop all tasks" aria-label="Stop all tasks">■</button>
+        <span class="me" title="Jack">J</span>
+      </div>
+    </nav>
+
+    <main class="main">
+      <header class="top">
+        <div class="pill" id="agent-pill">
+          <span class="face" id="pill-face"><i></i><i></i></span>
+          <span id="pill-name">Helper</span>
+        </div>
+        <div class="status" id="status"><span class="dot"></span><span id="status-text">Connecting…</span></div>
+      </header>
+
+      <div id="banner" class="banner" hidden></div>
+
+      <section id="chat" class="chat" aria-live="polite">
+        <div class="empty" id="empty">
+          <p class="empty-title">What should <span id="empty-name">Helper</span> do?</p>
+          <p class="muted">Nothing that changes or deletes files happens until you approve it.</p>
+          <div class="chips" id="chips"></div>
+        </div>
+      </section>
+
+      <form class="composer" id="composer">
+        <textarea id="input" rows="1" placeholder="Message…" aria-label="Message"></textarea>
+        <button class="send" type="submit" aria-label="Send">↑</button>
+      </form>
+    </main>
+  </div>
+</body>
+</html>

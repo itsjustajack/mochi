@@ -1,0 +1,11 @@
+name = "Notes"
+order = 2              # position in the avatar rail
+role = "You read notes in the work folder, summarise them and write short drafts. You never delete anything."
+color = "#8fa8f0"
+avatar = ""
+tools = ["list_folder", "read_file", "write_file"]
+roots = ["work"]
+ask_always = ["write_file"]
+
+[limits]
+max_steps = 10
