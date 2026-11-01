@@ -1,13 +1,16 @@
 """The `helper` command.
 
   helper init              set up ~/.helper (policy, settings, agents, key) and approve the policy
-  helper serve             run helperd: the web app and API on 127.0.0.1:8765
+  helper serve             run the engine without a window (the API on 127.0.0.1:8765 and the phone link)
+  helper-app               open the Windows app (Helper.exe is this, packed into one file)
   helper ask "goal"        run one task in this terminal; approvals are asked here
   helper stop | start      kill switch for a running helperd
   helper policy approve    approve the current policy files after you edit them by hand
   helper policy check      show whether the policy matches what you approved
   helper status            check the model server and the policy
   helper agents            list agents and anything capped by policy
+  helper link gmail|trello link an account with its own sign-in (Gmail starts read-only)
+  helper unlink NAME       remove a linked account's sign-in
 """
 
 from __future__ import annotations
@@ -154,10 +157,12 @@ def cmd_serve(home: Home, args) -> int:
               registry=registry, link_cfg=link_cfg)
     httpd = serve(app, "127.0.0.1", port)
     audit.write("system", event="serve", port=port)
+    from helper.scheduler import Scheduler
+    Scheduler(home.root, settings, audit).start()
     if link_cfg.get("enabled"):
         lport = int(link_cfg.get("port", DEFAULT_PORT))
         try:
-            lhttpd = serve_link(LinkApp(registry, runner, agents, settings, __version__),
+            lhttpd = serve_link(LinkApp(registry, runner, agents, settings, __version__, pc_app=app),
                                 str(link_cfg.get("host", "")), lport)
         except (ValueError, OSError) as e:
             print(f"Stub Link is off: {e}")
@@ -166,8 +171,7 @@ def cmd_serve(home: Home, args) -> int:
             link_cfg["running"] = True
             audit.write("system", event="link_serve", port=lport)
             print(f"Stub Link for your phone on {link_cfg.get('host')}:{lport} (home Wi-Fi only)")
-    print(f"helperd {__version__} on http://127.0.0.1:{port}")
-    print(f"Open this once to sign the app in (keep it private):\n  http://127.0.0.1:{port}/#key={token}")
+    print(f"helperd {__version__}: API on 127.0.0.1:{port} (no window; open Helper.exe for the app)")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
@@ -190,6 +194,30 @@ def _post_local(home: Home, path: str) -> int:
         return 1
 
 
+def cmd_link(home: Home, args) -> int:
+    from helper import accounts
+    try:
+        if args.account == "gmail":
+            if not args.client_id or not args.client_secret:
+                print("Make a free Google 'Desktop app' OAuth client first (see the README), then:\n"
+                      "  helper link gmail --client-id ID --client-secret SECRET [--allow-changes]")
+                return 2
+            print("Opening Google sign-in in your browser...")
+            res = accounts.link_gmail(home.root, args.client_id, args.client_secret, args.allow_changes)
+        else:
+            if not args.key or not args.token:
+                print("Get your Trello key at https://trello.com/power-ups/admin, then open\n  "
+                      + accounts.trello_token_url(args.key or "YOUR_KEY") + "\nand run:\n"
+                      "  helper link trello --key KEY --token TOKEN")
+                return 2
+            res = accounts.link_trello(home.root, args.key, args.token)
+    except accounts.AccountError as e:
+        print(f"Not linked: {e}", file=sys.stderr)
+        return 2
+    print(f"Linked {res['linked']} ({res.get('who') or 'signed in'}).")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="helper", description="Helper: local helper bots with a permission gate.")
     p.add_argument("--home", help="Helper home folder (default ~/.helper or C:\\BotWork\\.helper)")
@@ -209,6 +237,15 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("policy")
     s.add_argument("action", choices=["approve", "check"])
     s.add_argument("--yes", action="store_true")
+    s = sub.add_parser("link")
+    s.add_argument("account", choices=["gmail", "trello"])
+    s.add_argument("--client-id")
+    s.add_argument("--client-secret")
+    s.add_argument("--allow-changes", action="store_true", help="Gmail: let agents archive, label, draft and send")
+    s.add_argument("--key")
+    s.add_argument("--token")
+    s = sub.add_parser("unlink")
+    s.add_argument("account", choices=["gmail", "trello"])
     args = p.parse_args(argv)
     home = Home(default_home() if not args.home else __import__("pathlib").Path(args.home).expanduser())
     try:
@@ -224,6 +261,13 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_ask(home, args)
         if args.cmd == "serve":
             return cmd_serve(home, args)
+        if args.cmd == "link":
+            return cmd_link(home, args)
+        if args.cmd == "unlink":
+            from helper import accounts
+            accounts.Linked(home.root).unlink(args.account)
+            print(f"Unlinked {args.account}.")
+            return 0
         if args.cmd in ("stop", "start"):
             return _post_local(home, f"/v1/{args.cmd}")
     except (ConfigError, ModelError) as e:

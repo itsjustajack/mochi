@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <base-config cleartextTrafficPermitted="false" />
-    <!-- helperd runs in Termux on this phone and only listens on 127.0.0.1. -->
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="false">127.0.0.1</domain>
-    </domain-config>
+    <!-- Stub Link talks to Helper on Jack's own PC at its home Wi-Fi (or Tailscale) address, which
+         can't be listed ahead of time, so plain HTTP is allowed. Every call carries this phone's own
+         key, and brain dump notes are encrypted before they leave the phone. TLS for the link is
+         still to come. The app only ever connects to the address Jack typed when pairing. -->
+    <base-config cleartextTrafficPermitted="true" />
 </network-security-config>

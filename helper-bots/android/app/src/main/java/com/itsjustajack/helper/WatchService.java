@@ -16,7 +16,7 @@ import java.util.HashSet;
 import java.util.Set;
 
 /**
- * Watches helperd on 127.0.0.1 for actions that need Jack's OK and turns them into notifications.
+ * Watches Helper on the PC (over Stub Link) for actions that need Jack's OK and turns them into notifications.
  * Notifications name the agent and action only (no file names) and offer Deny; approving always
  * opens the app, which asks for a fingerprint or PIN first. Also keeps the home-screen widget fresh.
  */

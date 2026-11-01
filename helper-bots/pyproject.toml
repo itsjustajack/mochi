@@ -1,19 +1,22 @@
 [project]
 name = "helper-bots"
-version = "0.1.0"
-description = "Helper: free, local helper bots for Windows and Android (Termux) with a code-enforced permission gate."
+version = "0.2.0"
+description = "Helper: free, local helper bots for Windows and Android with a code-enforced permission gate."
 requires-python = ">=3.11"
-dependencies = []  # standard library only, so it installs the same way in Termux and on Windows
+dependencies = []  # standard library only (the Windows app uses tkinter, which comes with Python)
 
 [project.scripts]
 helper = "helper.cli:main"
+
+[project.gui-scripts]
+helper-app = "helper.desktop.ui:main"
 
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["helper", "helper.skills"]
+packages = ["helper", "helper.skills", "helper.desktop"]
 
 [tool.setuptools.package-data]
-helper = ["web/*", "defaults/**/*", "skills/originals/*"]
+helper = ["defaults/**/*", "skills/originals/*"]

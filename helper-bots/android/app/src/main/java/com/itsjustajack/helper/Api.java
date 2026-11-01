@@ -3,6 +3,7 @@ package com.itsjustajack.helper;
 import android.content.Context;
 
 import org.json.JSONArray;
+import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
@@ -11,12 +12,16 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 
-/** Tiny client for helperd on 127.0.0.1. Call from a background thread only. */
+/**
+ * Client for Helper on the PC, over Stub Link (home Wi-Fi, or Tailscale when away).
+ * The phone has its own device key from pairing. Every PC screen route is reached as
+ * /v2/app/... (the PC maps it to the same checks as its own app). Call from a background thread.
+ */
 final class Api {
-    static final String HOST = "127.0.0.1";
-    static final int DEFAULT_PORT = 8765;
+    static final int DEFAULT_PORT = 8766;
 
     static final class HttpError extends IOException {
         final int code;
@@ -24,45 +29,71 @@ final class Api {
     }
 
     private final String key;
+    private final String host;
     private final int port;
 
-    Api(String key, int port) {
+    Api(String key, String host, int port) {
         this.key = key;
+        this.host = host;
         this.port = port;
     }
 
-    /** Null if no key has been set up yet. */
+    /** Null until the phone is paired with the PC. */
     static Api from(Context c) {
         String key = KeyBox.load(c);
-        if (key == null) return null;
-        return new Api(key, port(c));
+        String host = KeyBox.prefs(c).getString("pc_host", null);
+        if (key == null || host == null) return null;
+        return new Api(key, host, KeyBox.prefs(c).getInt("pc_port", DEFAULT_PORT));
     }
 
-    static int port(Context c) {
-        return KeyBox.prefs(c).getInt("port", DEFAULT_PORT);
+    /** Pair once with the code shown on the PC. Returns {device_id, key, notes_key}. */
+    static JSONObject pair(String host, int port, String code, String name) throws IOException {
+        try {
+            return new Api(null, host, port).call("POST", "/v2/pair",
+                    new JSONObject().put("code", code).put("name", name));
+        } catch (JSONException e) {
+            throw new IOException(e);
+        }
     }
 
-    static String baseUrl(Context c) {
-        return "http://" + HOST + ":" + port(c) + "/";
+    /** A PC app route like "/v1/today" becomes "/v2/app/today". */
+    private static String map(String path) {
+        if (path.startsWith("/v1/")) return "/v2/app/" + path.substring(4);
+        return path;
     }
 
     JSONObject get(String path) throws IOException {
-        return call("GET", path, null);
+        return call("GET", map(path), null);
     }
 
     JSONObject post(String path, JSONObject body) throws IOException {
-        return call("POST", path, body == null ? new JSONObject() : body);
+        return call("POST", map(path), body == null ? new JSONObject() : body);
+    }
+
+    JSONObject health() throws IOException {
+        return call("GET", "/v2/health", null);
+    }
+
+    /** An encrypted brain dump note (see Notes). */
+    void sendNote(byte[] sealed) throws IOException {
+        try {
+            call("POST", "/v2/notes", new JSONObject().put("note",
+                    android.util.Base64.encodeToString(sealed, android.util.Base64.NO_WRAP)));
+        } catch (JSONException e) {
+            throw new IOException(e);
+        }
     }
 
     private JSONObject call(String method, String path, JSONObject body) throws IOException {
-        HttpURLConnection conn = (HttpURLConnection) new URL("http://" + HOST + ":" + port + path).openConnection();
+        URL url = new URL("http", host, port, path);
+        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         try {
             conn.setRequestMethod(method);
-            conn.setConnectTimeout(2500);
-            conn.setReadTimeout(8000);
+            conn.setConnectTimeout(3000);
+            conn.setReadTimeout(10000);
             conn.setUseCaches(false);
             conn.setInstanceFollowRedirects(false);
-            conn.setRequestProperty("Authorization", "Bearer " + key);
+            if (key != null) conn.setRequestProperty("Authorization", "Bearer " + key);
             conn.setRequestProperty("Accept", "application/json");
             if (body != null) {
                 byte[] bytes = body.toString().getBytes(StandardCharsets.UTF_8);
@@ -79,7 +110,7 @@ final class Api {
             JSONObject json;
             try {
                 json = text.isEmpty() ? new JSONObject() : new JSONObject(text);
-            } catch (Exception e) {
+            } catch (JSONException e) {
                 json = new JSONObject();
             }
             if (code >= 400) throw new HttpError(code, json.optString("error", "HTTP " + code));
@@ -96,22 +127,28 @@ final class Api {
         int total = 0;
         while ((n = in.read(buf)) > 0) {
             total += n;
-            if (total > 2_000_000) throw new IOException("response too large");
+            if (total > 4_000_000) throw new IOException("response too large");
             out.write(buf, 0, n);
         }
         return out.toString("UTF-8");
     }
 
-    /** Pending approvals, newest last. */
+    static String enc(String s) {
+        try {
+            return URLEncoder.encode(s, "UTF-8");
+        } catch (java.io.UnsupportedEncodingException e) {
+            return s;
+        }
+    }
+
+    /** Pending OK cards, newest last. */
     JSONArray approvals() throws IOException {
         return get("/v1/approvals").optJSONArray("approvals");
     }
 
-    /** Finds one pending approval by id, or null. */
     JSONObject approval(String id) throws IOException {
         JSONArray list = approvals();
-        if (list == null) return null;
-        for (int i = 0; i < list.length(); i++) {
+        for (int i = 0; list != null && i < list.length(); i++) {
             JSONObject a = list.optJSONObject(i);
             if (a != null && id.equals(a.optString("id"))) return a;
         }
@@ -120,9 +157,8 @@ final class Api {
 
     void decide(String id, String verdict) throws IOException {
         try {
-            post("/v1/approvals/" + java.net.URLEncoder.encode(id, "UTF-8"),
-                    new JSONObject().put("verdict", verdict));
-        } catch (org.json.JSONException e) {
+            post("/v1/approvals/" + enc(id), new JSONObject().put("verdict", verdict));
+        } catch (JSONException e) {
             throw new IOException(e);
         }
     }
@@ -132,19 +168,20 @@ final class Api {
     }
 
     /**
-     * One line in plain words. With details=false only the agent and the action are named, never
-     * file names, so nothing private shows on the home screen or lock screen.
+     * One line in plain words. With details=false only the agent and the job are named, never
+     * file names or email text, so nothing private shows on the lock screen.
      */
     static String describe(JSONObject a, boolean details) {
         StringBuilder sb = new StringBuilder();
-        sb.append(a.optString("agent", "Helper")).append(" wants to ")
-          .append(a.optString("tool", "do something").replace('_', ' '));
+        sb.append(a.optString("agent", "Helper")).append(" wants to: ")
+          .append(a.optString("job", a.optString("tool", "do something").replace('_', ' ')));
         JSONObject args = details ? a.optJSONObject("args") : null;
         if (args != null) {
             JSONArray names = args.names();
             for (int i = 0; names != null && i < names.length(); i++) {
                 String k = names.optString(i);
                 String v = args.optString(k);
+                if (v.length() > 300) v = v.substring(0, 300) + "…";
                 sb.append("\n").append(k).append(": ").append(v);
             }
         }

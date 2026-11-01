@@ -27,13 +27,41 @@ TYPES = ("place", "character", "rule", "item", "event", "term")
 STATUSES = ("canon", "draft", "retired")
 ID_RE = re.compile(r"^LORE-\d{4}$")
 
+# Two separate ledgers with the same rules. "lore" is story canon. "private" is Jack's real life
+# (accounts, people, documents, routines): kept in its own file, never shown to story agents, and it
+# never holds a password, PIN, 2-step code or recovery key, only where one lives.
+SECTIONS = {
+    "lore": {"prefix": "LORE", "types": TYPES, "title": "Lore Ledger", "file": "lore_ledger.json"},
+    "private": {"prefix": "REC", "types": ("account", "person", "place", "document", "routine", "date", "note"),
+                "title": "Private records", "file": "private_ledger.json"},
+}
+_SECRET_RE = re.compile(
+    r"\b(pass(?:word|wd|code|phrase)|pin|2fa|otp|one[- ]time code|recovery (?:key|code)|backup code|security answer|"
+    r"cvv|card number)\b\s*(?:is|=|:|-)\s*\S+"
+    r"|\b\d{4}[ -]?\d{4}[ -]?\d{4}[ -]?\d{4}\b",
+    re.IGNORECASE)
+
+
+def looks_secret(text: str) -> bool:
+    """A password, PIN, code or card number written out. Saying where it lives is fine."""
+    return bool(_SECRET_RE.search(text or ""))
+
+
+def _sec(section: str) -> dict:
+    if section not in SECTIONS:
+        raise ValueError("section must be lore or private")
+    return SECTIONS[section]
+
 
 def empty_ledger() -> dict:
     return {"revision": 1, "updated": _dt.date.today().isoformat(), "entries": [],
             "changelog": [{"rev": 1, "date": _dt.date.today().isoformat(), "reason": "New ledger", "changes": []}]}
 
 
-def validate(ledger) -> list[str]:
+def validate(ledger, section: str = "lore") -> list[str]:
+    sec = _sec(section)
+    id_re = re.compile(rf"^{sec['prefix']}-\d{{4}}$")
+    types = sec["types"]
     errors: list[str] = []
     err = errors.append
     if not isinstance(ledger, dict):
@@ -53,13 +81,15 @@ def validate(ledger) -> list[str]:
             err("An entry is not an object.")
             continue
         eid = e.get("id") if isinstance(e.get("id"), str) else "(no id)"
-        if not ID_RE.match(eid):
-            err(f"{eid}: id must look like LORE-0001.")
+        if not id_re.match(eid):
+            err(f"{eid}: id must look like {sec['prefix']}-0001.")
         if eid in by_id:
             err(f"{eid}: duplicate id.")
         by_id[eid] = e
-        if e.get("type") not in TYPES:
-            err(f"{eid}: type must be one of {', '.join(TYPES)}.")
+        if e.get("type") not in types:
+            err(f"{eid}: type must be one of {', '.join(types)}.")
+        if section == "private" and any(looks_secret(str(e.get(f, ""))) for f in ("name", "summary", "details")):
+            err(f"{eid}: looks like it holds a password, PIN or code. Only say where it lives (for example \"in RoboForm\").")
         if e.get("status") not in STATUSES:
             err(f"{eid}: status must be one of {', '.join(STATUSES)}.")
         for f in ("name", "summary"):
@@ -125,7 +155,8 @@ ADD_FIELDS = {"key", "type", "name", "summary", "details", "related", "source", 
 UPDATE_FIELDS = {"name", "type", "summary", "details", "related"}
 
 
-def apply_patch(ledger: dict, patch: dict, approved: bool = False, today: str | None = None) -> dict:
+def apply_patch(ledger: dict, patch: dict, approved: bool = False, today: str | None = None,
+                section: str = "lore") -> dict:
     """Returns {"ledger", "notes"} or {"errors"}. `approved` is True only for Jack's own click."""
     today = today or _dt.date.today().isoformat()
     if not isinstance(patch, dict):
@@ -138,7 +169,8 @@ def apply_patch(ledger: dict, patch: dict, approved: bool = False, today: str | 
         early.append("The patch needs a non-empty ops list.")
     if early:
         return {"errors": early}
-    before = validate(ledger)
+    prefix = _sec(section)["prefix"]
+    before = validate(ledger, section)
     if before:
         return {"errors": ["The ledger already has problems. Fix these first:"] + before}
 
@@ -146,12 +178,12 @@ def apply_patch(ledger: dict, patch: dict, approved: bool = False, today: str | 
     rev = ledger["revision"] + 1
     find = lambda i: next((e for e in nxt["entries"] if e["id"] == i), None)  # noqa: E731
     errors, notes = [], []
-    counter = max([0] + [int(e["id"][5:]) for e in nxt["entries"]])
+    counter = max([0] + [int(e["id"].split("-")[1]) for e in nxt["entries"]])
     id_for_op, keys = {}, {}
     for i, op in enumerate(ops):
         if isinstance(op, dict) and op.get("op") == "add":
             counter += 1
-            nid = f"LORE-{counter:04d}"
+            nid = f"{prefix}-{counter:04d}"
             id_for_op[i] = nid
             k = (op.get("entry") or {}).get("key") if isinstance(op.get("entry"), dict) else None
             if k is not None:
@@ -255,18 +287,19 @@ def apply_patch(ledger: dict, patch: dict, approved: bool = False, today: str | 
     nxt["revision"] = rev
     nxt["updated"] = today
     nxt["changelog"].append({"rev": rev, "date": today, "reason": patch["reason"], "changes": notes})
-    after = validate(nxt)
+    after = validate(nxt, section)
     if after:
         return {"errors": ["The change would break the ledger:"] + after}
     return {"ledger": nxt, "notes": notes}
 
 
-def report(ledger: dict) -> str:
+def report(ledger: dict, section: str = "lore") -> str:
+    sec = _sec(section)
     by = lambda s: [e for e in ledger["entries"] if e["status"] == s]  # noqa: E731
-    lines = [f"Lore Ledger, revision {ledger['revision']} ({ledger.get('updated', 'no date')})",
+    lines = [f"{sec['title']}, revision {ledger['revision']} ({ledger.get('updated', 'no date')})",
              f"Canon: {len(by('canon'))} | Drafts waiting for approval: {len(by('draft'))} | Retired: {len(by('retired'))}",
              "", "CANON"]
-    for t in TYPES:
+    for t in sec["types"]:
         lst = [e for e in by("canon") if e["type"] == t]
         if lst:
             lines.append(f" {t}: " + ", ".join(f"{e['name']} ({e['id']})" for e in lst))
@@ -279,11 +312,16 @@ def report(ledger: dict) -> str:
 
 
 class LedgerStore:
-    """lore_ledger.json in Helper's state folder (no tool can write there directly)."""
+    """lore_ledger.json (or private_ledger.json) in Helper's state folder (no tool can write there directly)."""
 
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, section: str = "lore"):
         self.path = path
+        self.section = _sec(section) and section
         self._lock = threading.Lock()
+
+    @classmethod
+    def for_home(cls, home: Path, section: str = "lore") -> "LedgerStore":
+        return cls(Path(home) / "state" / _sec(section)["file"], section)
 
     def load(self) -> dict:
         if not self.path.exists():
@@ -292,7 +330,7 @@ class LedgerStore:
 
     def apply(self, patch: dict, approved: bool = False) -> dict:
         with self._lock:
-            res = apply_patch(self.load(), patch, approved=approved)
+            res = apply_patch(self.load(), patch, approved=approved, section=self.section)
             if "errors" in res:
                 return res
             self.path.parent.mkdir(parents=True, exist_ok=True)

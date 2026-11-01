@@ -6,12 +6,14 @@ Every call runs the same checks, in order, and stops at the first that fails:
   3. Kill switch    - after "Stop all", deny everything until "Start"
   4. Integrity      - policy files must match the hash Jack approved, or tier 2+ is denied
   5. Rate limit     - at most max_tier2_calls tier 2+ calls per task
-  6. Tier rule      - 0/1 allow; 2 allow only if allowlisted (and the task is clean), else ask; 3 always asks
-     Taint rule     - a task that read untrusted content gets tier 2 off-allowlist denied, tier 3 asks with a warning
+  6. Checklist      - Jack's row for this agent and job: Do runs, Ask me asks, Never refuses.
+                      Rows Jack hasn't set: tier 0/1 Do, tier 2 Ask me (Do if allowlisted), tier 3 Ask me.
+     Not sure? Stop - a task that read untrusted content pauses even Do rows and asks (per agent, on by default)
      Fatigue        - after fatigue_max approval requests in the window, the task pauses instead of asking again
   7. Record         - the decision is written to the audit log before the tool runs
 
-Nothing in here trusts the model. Only the ui (Jack's click or typed answer) can grant an approval.
+Nothing in here trusts the model. Only the ui (Jack's click or typed answer) can grant an approval
+or change a checklist row.
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Literal
 
+from helper import checklist
 from helper import tools as toolmod
 from helper.audit import Audit
 from helper.config import Home, Policy, policy_digest, policy_is_approved
@@ -54,6 +57,7 @@ class Approval:
     status: Literal["pending", "approved", "denied", "stopped", "expired"] = "pending"
     decided_by: str | None = None
     decided_at: float | None = None
+    always: bool = False   # Jack pressed "Always": approve, and set this job to Do for this agent
     _event: threading.Event = field(default_factory=threading.Event, repr=False)
 
     def public(self) -> dict:
@@ -61,8 +65,13 @@ class Approval:
             "id": self.id, "task_id": self.task_id, "agent": self.agent, "tool": self.tool,
             "tier": self.tier, "args": {k: str(v) for k, v in self.args.items()},
             "reason": self.reason, "tainted": self.tainted, "status": self.status,
+            "job": _label(self.tool),
             "created": self.created,
         }
+
+
+def _label(tool: str) -> str:
+    return checklist.label(tool)
 
 
 class ApprovalQueue:
@@ -93,14 +102,18 @@ class ApprovalQueue:
 
     def resolve(self, approval_id: str, verdict: str, by: str) -> Approval | None:
         """Called ONLY by the ui module, in response to Jack."""
-        if verdict not in ("approve", "deny", "stop"):
-            raise ValueError("verdict must be approve, deny or stop")
+        if verdict not in ("approve", "always", "deny", "stop"):
+            raise ValueError("verdict must be approve, always, deny or stop")
+        always = verdict == "always"
+        if always:
+            verdict = "approve"
         with self._lock:
             a = self._items.get(approval_id)
             if not a or a.status != "pending":
                 return None
             a.status = {"approve": "approved", "deny": "denied", "stop": "stopped"}[verdict]
             a.decided_by, a.decided_at = by, time.time()
+            a.always = always
         a._event.set()
         return a
 
@@ -157,6 +170,8 @@ class Gate:
         self.approvals = approvals or ApprovalQueue()
         self.kill = kill or KillSwitch()
         self.protected = home.protected_paths()
+        self.checklists = checklist.Checklists(home.state_dir / "checklists.json", policy)
+        self.done_log = checklist.DoneLog(home.state_dir / "done_for_you.json")
 
     # ------------------------------------------------------------ checks
 
@@ -177,6 +192,8 @@ class Gate:
             return Decision("deny", f"unknown or disabled tool: {action}", action)
         if action not in agent.tools:
             return Decision("deny", f"{agent.name} is not set up to use {action}", action, tier)
+        if agent.story and action.startswith("private_"):
+            return Decision("deny", "story agents never see your private records", action, tier)
         # 2. Valid args (paths resolved inside this agent's folders, never protected folders)
         try:
             clean = toolmod.validate_args(spec, args, agent.roots, self.protected)
@@ -193,20 +210,24 @@ class Gate:
         limit = agent.limits.get("max_tier2_calls") or p.limits.get("max_tier2_calls", 10)
         if tier >= 2 and task.tier2_calls >= limit:
             return d("deny", f"rate limit: {limit} changing actions per task")
-        # 6. Tier, taint and fatigue rules
+        # 6. Jack's checklist for this agent (Do / Ask me / Never), taint and fatigue rules
         dirty = task.tainted or task.suspicious
-        if tier <= 1:
-            return d("allow", f"tier {tier}")
-        if tier == 2:
-            listed = action in p.auto_allow and action not in agent.ask_always
-            if listed and not dirty:
-                return d("allow", "tier 2: on the allowlist")
-            if dirty and action not in p.auto_allow:
-                return d("deny", "tier 2 off the allowlist in a task that read untrusted content")
-            verdict = "ask"
-            reason = "tier 2: not on the allowlist" if not listed else "tier 2: allowlisted, but this task read untrusted content"
+        choice = self.checklists.choice(agent, action, tier)
+        job = checklist.label(action)
+        if choice == "never":
+            return d("deny", f"your checklist for {agent.name} says Never for \"{job}\"")
+        if choice == "do":
+            if not dirty or tier == 0:
+                return d("allow", f"your checklist says Do for \"{job}\"")
+            if not self.checklists.not_sure_stop(agent):
+                return d("allow", f"your checklist says Do for \"{job}\" (Not sure? Stop is off)")
+            verdict, reason = "ask", (f"\"{job}\" is Do on your checklist, but this task read outside text, "
+                                      "so it pauses (Not sure? Stop)")
         else:
-            verdict, reason = "ask", f"tier 3: {action} always needs your OK"
+            verdict = "ask"
+            reason = f"\"{job}\" is Ask me on your checklist"
+            if dirty:
+                reason += " (this task read outside text: check it carefully)"
         window = p.limits.get("fatigue_window_s", 600)
         recent = [t for t in task.approval_times if time.time() - t < window]
         if len(recent) >= p.limits.get("fatigue_max", 5):
@@ -251,4 +272,10 @@ class Gate:
         result = toolmod.execute(toolmod.REGISTRY[action], decision.args, ctx)
         self.audit.write("tool_call", task=task.id, tool=action, ok=result.ok, source=result.source,
                          taints=result.taints, chars=len(result.data))
+        if result.ok and approval is None and (decision.tier or 0) >= 1:
+            # Done on its own (a Do row): goes in the Done for you log, with Undo where possible
+            self.done_log.add(task.agent.key, action, result.data, result.undo)
+        if result.ok and approval is not None and approval.always:
+            self.checklists.set(task.agent, action, "do", by=approval.decided_by or "ui",
+                                why=f"{checklist.label(action)}: Do (Always on an OK card)")
         return Outcome(decision, result, approval)

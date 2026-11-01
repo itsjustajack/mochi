@@ -11,11 +11,11 @@ import android.view.Gravity;
 import android.widget.Button;
 import android.widget.TextView;
 
-/** Shared colours, notification channels and small view helpers, matching the web app. */
+/** Shared colours, notification channels and small view helpers, matching the Windows app. */
 final class Ui {
-    static final int BG = 0xFF101412, PANEL = 0xFF171C19, PANEL2 = 0xFF1E2420, LINE = 0xFF262D29;
-    static final int TEXT = 0xFFE8EFE9, MUTED = 0xFF93A197, ACCENT = 0xFF7CC4A4;
-    static final int OK = 0xFF4CC38A, WARN = 0xFFE5B450, BAD = 0xFFEF6B73;
+    static final int BG = 0xFF17212B, PANEL = 0xFF182533, PANEL2 = 0xFF1F2F3F, LINE = 0xFF24364A;
+    static final int TEXT = 0xFFF5F5F5, MUTED = 0xFF7F91A4, ACCENT = 0xFF5288C1, RAIL = 0xFF0E1621;
+    static final int OK = 0xFF5FB878, WARN = 0xFFE0B05F, BAD = 0xFFE06C6C;
 
     static final String CH_APPROVALS = "approvals";
     static final String CH_WATCH = "watch";
@@ -71,12 +71,30 @@ final class Ui {
         b.setText(s);
         b.setAllCaps(false);
         b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-        b.setTextColor(primary ? BG : TEXT);
+        b.setTextColor(primary ? 0xFFFFFFFF : TEXT);
         b.setBackground(round(c, primary ? ACCENT : Color.TRANSPARENT, 999, primary ? 0 : LINE));
         b.setMinHeight(dp(c, 48));
         b.setGravity(Gravity.CENTER);
         b.setStateListAnimator(null);
         int p = dp(c, 18);
+        b.setPadding(p, 0, p, 0);
+        return b;
+    }
+
+    /** A small flat button in a given colour. */
+    static Button chip(Context c, String s, int fill, boolean on) {
+        Button b = new Button(c);
+        b.setText(s);
+        b.setAllCaps(false);
+        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        b.setTextColor(on ? 0xFFFFFFFF : MUTED);
+        b.setBackground(round(c, on ? fill : LINE, 8, 0));
+        b.setMinHeight(dp(c, 36));
+        b.setMinimumHeight(dp(c, 36));
+        b.setMinWidth(0);
+        b.setMinimumWidth(0);
+        b.setStateListAnimator(null);
+        int p = dp(c, 10);
         b.setPadding(p, 0, p, 0);
         return b;
     }

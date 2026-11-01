@@ -1,9 +1,10 @@
-# HARD LIMITS. Only Jack edits this file, by hand.
+# Limits and tool tiers. Only Jack edits this file, by hand.
 # After any change run `helper policy approve`, or every tier 2 and 3 call is refused.
-# Nothing below this layer (settings, profiles, agents, task words) can go past these.
 #
-# Tiers: 0 = read / harmless, 1 = small reversible, 2 = changes things (asks unless allowlisted),
-#        3 = destructive or outward (always asks, no "always allow").
+# Tiers say how big a job is. They only set the STARTING row on each agent's checklist:
+#   0 = read / harmless (starts as Do), 1 = small and reversible (starts as Do),
+#   2 = changes things (starts as Ask me, or Do if in auto_allow), 3 = destructive or outward (starts as Ask me).
+# Jack can then set any job for any agent to Do, Ask me or Never in Settings. Nothing is locked.
 
 [limits]
 max_steps = 15            # per task
@@ -20,14 +21,28 @@ max_result_chars = 16000  # tool output is cut to this before the model sees it
 list_folder = 0
 read_file = 0
 roll_dice = 0
-check_code = 0
+check_code = 0        # reads a script and reports problems; never runs it
 ledger_search = 0     # read the Guild Ledger
-ledger_propose = 1
+ledger_propose = 1    # add a draft entry; only Jack makes canon
 knowledge_search = 0  # search linked Drive folders (read-only)
-knowledge_read = 0    # read a file from linked Drive folders    # add a draft entry; only Jack makes canon        # reads a script and reports problems; never runs it
+knowledge_read = 0    # read a file from linked Drive folders
+private_search = 0    # Jack's private records (real life, kept apart from story lore)
+remind = 1            # set a reminder for Jack (undo removes it)
+private_propose = 1   # add a draft private record; never a password, only where it lives
+# Linked accounts (only work after Jack links the account himself)
+gmail_search = 0      # read and sort email (email text is untrusted)
+gmail_read = 0
+gmail_draft = 1       # a Gmail draft; nothing is sent
+gmail_archive = 2
+gmail_label = 2
+trello_boards = 0
+trello_add_card = 2
 write_file = 2
 move_file = 2
 delete_file = 3
+gmail_send = 3
+gmail_trash = 3
+gmail_unsubscribe = 3
 
 # Tools that are off everywhere, whatever an agent asks for.
 # There is deliberately no shell tool at all.

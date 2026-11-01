@@ -1,4 +1,4 @@
-"""helperd's local web app and API on 127.0.0.1:8765.
+"""helperd's local API on 127.0.0.1:8765 (no web pages: the screens are the Windows and phone apps).
 
 Security rules (learned from the Stub / Muse teardown):
 - Every /v1 route needs the bearer token, including from 127.0.0.1. Compared in constant time.
@@ -23,9 +23,6 @@ from urllib.parse import urlparse
 
 from helper.loop import Runner, pick_agent
 
-WEB = Path(__file__).parent / "web"
-STATIC = {"/": "index.html", "/app.css": "app.css", "/app.js": "app.js", "/icon.svg": "icon.svg",
-          "/manifest.webmanifest": "manifest.webmanifest"}
 MAX_BODY = 64 * 1024
 HEADERS = {
     "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
@@ -75,7 +72,7 @@ class App:
 
     # ------------------------------------------------------------ API
 
-    def handle(self, method: str, path: str, body: dict | None) -> tuple[int, dict]:
+    def handle(self, method: str, path: str, body: dict | None, by: str = "ui:pc") -> tuple[int, dict]:
         gate = self.runner.gate
         default = self.settings.get("general", {}).get("default_agent", "organizer")
         if method == "GET" and path == "/v1/status":
@@ -110,16 +107,16 @@ class App:
             return 200, {"approvals": [a.public() for a in gate.approvals.pending()]}
         if method == "POST" and path.startswith("/v1/approvals/"):
             verdict = str((body or {}).get("verdict", ""))
-            if verdict not in ("approve", "deny", "stop"):
-                return 400, {"error": "verdict must be approve, deny or stop"}
-            a = gate.approvals.resolve(path.rsplit("/", 1)[1], verdict, by="ui:web")
+            if verdict not in ("approve", "always", "deny", "stop"):
+                return 400, {"error": "verdict must be approve, always, deny or stop"}
+            a = gate.approvals.resolve(path.rsplit("/", 1)[1], verdict, by=by)
             return (200, a.public()) if a else (404, {"error": "no pending approval with that id"})
         if method == "POST" and path == "/v1/stop":
-            self.runner.stop_all(by="ui:web")
+            self.runner.stop_all(by=by)
             return 200, {"stopped": True}
         if method == "POST" and path == "/v1/start":
             gate.kill.start()
-            self.runner.audit.write("system", event="start", by="ui:web")
+            self.runner.audit.write("system", event="start", by=by)
             return 200, {"stopped": False}
         if method == "POST" and path == "/v1/code/check":
             from helper import codecheck
@@ -141,28 +138,219 @@ class App:
                     res = knowledge.set_mode(state, self.runner.policy, str((body or {}).get("mode", "")))
                 except ValueError as e:
                     return 400, {"error": str(e)}
-                self.runner.audit.write("system", event="content_mode", mode=res["mode"], by="ui:web")
+                self.runner.audit.write("system", event="content_mode", mode=res["mode"], by=by)
                 return 200, res
         if method == "GET" and path == "/v1/rules":
             from helper import knowledge
             pol = self.runner.policy
             return 200, {"rules": knowledge.rules_status(pol.rule_docs, self.runner.home_root / "state"),
                          "knowledge": [str(k) for k in pol.knowledge]}
+        if path.startswith("/v1/checklists") or path.startswith("/v1/done"):
+            return self.handle_checklists(method, path, body or {}, by=by)
+        if path.startswith("/v1/accounts") or path.startswith("/v1/inbox"):
+            return self.handle_accounts(method, path, body or {}, by)
+        if path.split("/")[2] in ("today", "calm", "reminders", "capture"):
+            return self.handle_today(method, path, body or {}, by)
         if path.startswith("/v1/ledger"):
             return self.handle_ledger(method, path, body or {})
+        if path.startswith("/v1/private"):
+            return self.handle_ledger(method, path.replace("/v1/private", "/v1/ledger", 1), body or {}, "private")
         if path.startswith("/v1/link"):
             return self.handle_link(method, path)
         if method == "GET" and path == "/v1/activity":
             return 200, {"events": self.runner.audit.tail(200)}
         return 404, {"error": "not found"}
 
-    def handle_ledger(self, method: str, path: str, body: dict) -> tuple[int, dict]:
-        """Guild Ledger panel. Promote and retire here are Jack's own clicks, so they count as approval."""
+    def handle_accounts(self, method: str, path: str, body: dict, by: str) -> tuple[int, dict]:
+        """Settings > Accounts, and the Inbox screen (morning readout and piles)."""
+        from helper import accounts
+        home = self.runner.home_root
+        linked = accounts.Linked(home)
+        parts = [p for p in path.split("/") if p]
+        if parts[1] == "inbox":
+            from helper.scheduler import Scheduler
+            sched = Scheduler(home, self.settings, self.runner.audit)
+            if method == "GET" and len(parts) == 2:
+                return 200, {"readout": sched.latest_readout(), "linked": bool(linked.info("gmail"))}
+            if method == "POST" and parts[2:] == ["readout"]:
+                return 200, {"readout": sched.build_readout()}
+            if method == "GET" and parts[2:] == ["piles"]:
+                try:
+                    rows = accounts.Gmail(home).search(str(body.get("q", "")) or "in:inbox newer_than:2d", 40)
+                except accounts.AccountError as e:
+                    return 409, {"error": str(e)}
+                return 200, {"piles": {p: [m for m in rows if m["pile"] == p] for p in accounts.PILES},
+                             "names": accounts.PILE_WORDS}
+            return 404, {"error": "not found"}
+        if method == "GET" and len(parts) == 2:
+            return 200, {"accounts": linked.public(self.agents, self.runner.gate.checklists)}
+        if method == "POST" and len(parts) == 4 and parts[3] == "unlink" and parts[2] in accounts.PROVIDERS:
+            linked.unlink(parts[2])
+            self.runner.audit.write("system", event="unlink", account=parts[2], by=by)
+            return 200, {"unlinked": parts[2]}
+        if method == "POST" and len(parts) == 4 and parts[3] == "link":
+            if by.startswith("link:"):
+                return 403, {"error": "Link accounts on the PC: the sign-in opens in the PC's browser."}
+            try:
+                if parts[2] == "trello":
+                    res = accounts.link_trello(home, str(body.get("key", "")), str(body.get("token", "")))
+                elif parts[2] == "gmail":
+                    cid, csec = str(body.get("client_id", "")).strip(), str(body.get("client_secret", "")).strip()
+                    if not cid or not csec:
+                        return 400, {"error": "paste the Google client id and secret first"}
+                    threading.Thread(target=self._link_gmail, args=(cid, csec, bool(body.get("can_change")), by),
+                                     daemon=True).start()
+                    return 202, {"started": "gmail", "text": "Finish signing in to Google in your browser."}
+                else:
+                    return 404, {"error": "no such account type"}
+            except accounts.AccountError as e:
+                return 400, {"error": str(e)}
+            self.runner.audit.write("system", event="link_account", account=parts[2], by=by)
+            return 200, res
+        return 404, {"error": "not found"}
+
+    def _link_gmail(self, cid: str, csec: str, can_change: bool, by: str) -> None:
+        from helper import accounts
+        try:
+            accounts.link_gmail(self.runner.home_root, cid, csec, can_change)
+            self.runner.audit.write("system", event="link_account", account="gmail", can_change=can_change, by=by)
+        except accounts.AccountError as e:
+            self.runner.audit.write("system", event="link_account_failed", account="gmail", error=str(e), by=by)
+
+    def handle_today(self, method: str, path: str, body: dict, by: str) -> tuple[int, dict]:
+        """Needs you, Just one thing, Too much, quiet hours, reminders and the brain dump."""
+        import datetime as dt
+        from helper.calm import SNOOZES, Calm, Reminders, needs_you, one_thing
+        from helper.capture import CaptureStore
+        state = self.runner.home_root / "state"
+        calm, rem, cap = Calm(state), Reminders(state), CaptureStore(state)
+        parts = [p for p in path.split("/") if p]
+        if method == "GET" and parts == ["v1", "today"]:
+            rem.roll_missed()
+            view = needs_you(rem, calm, [a.public() for a in self.runner.gate.approvals.pending()],
+                             len(cap.list("new")), at_pc=by.startswith("ui:"))
+            return 200, {**view, "one_thing": one_thing(view), "calm": calm.get()}
+        if parts == ["v1", "calm"]:
+            if method == "GET":
+                return 200, calm.get()
+            try:
+                res = calm.set(**body)
+            except (ValueError, TypeError) as e:
+                return 400, {"error": str(e)}
+            self.runner.audit.write("system", event="calm", changes=sorted(body), by=by)
+            return 200, res
+        if parts[1] == "reminders":
+            if method == "GET" and len(parts) == 2:
+                return 200, {"reminders": rem.list("open"), "snoozes": list(SNOOZES)}
+            if method == "POST" and len(parts) == 2:
+                due = body.get("due")
+                try:
+                    r = rem.add(str(body.get("text", "")), str(body.get("first_step", "")),
+                                float(due) if due else None, source=by, urgent=bool(body.get("urgent")))
+                except ValueError as e:
+                    return 400, {"error": str(e)}
+                return 201, r
+            if method == "POST" and len(parts) == 4 and parts[3] in ("done", "drop", "snooze"):
+                try:
+                    if parts[3] == "done":
+                        r = rem.done(parts[2])
+                        calm.add_xp(10)
+                    elif parts[3] == "drop":
+                        r = rem.drop(parts[2])
+                    else:
+                        r = rem.snooze(parts[2], str(body.get("choice", "")), dt.datetime.now())
+                except KeyError:
+                    return 404, {"error": "no such reminder"}
+                except ValueError as e:
+                    return 400, {"error": str(e)}
+                return 200, r
+        if parts[1] == "capture":
+            if method == "GET" and len(parts) == 2:
+                return 200, {"notes": cap.list("new")}
+            if method == "POST" and len(parts) == 2:
+                try:
+                    return 201, cap.add(str(body.get("text", "")), source=by)
+                except ValueError as e:
+                    return 400, {"error": str(e)}
+            if method == "POST" and len(parts) == 4 and parts[3] == "sort":
+                note = next((n for n in cap.list() if n["id"] == parts[2]), None)
+                if note is None:
+                    return 404, {"error": "no such note"}
+                picked = body.get("keep", [])
+                if not isinstance(picked, list) or not all(isinstance(i, int) for i in picked):
+                    return 400, {"error": "keep must be a list of item numbers"}
+                made = []
+                for i in picked:
+                    if 0 <= i < len(note["items"]):
+                        it = note["items"][i]
+                        made.append(rem.add(it["text"], it.get("first_step", ""), source="brain dump"))
+                cap.mark(note["id"], "sorted")
+                return 200, {"reminders": made}
+        return 404, {"error": "not found"}
+
+    def handle_checklists(self, method: str, path: str, body: dict, by: str) -> tuple[int, dict]:
+        """Settings > Agents: Do / Ask me / Never rows, presets, Not sure? Stop, Undo, Done for you.
+        Reached only with the PC key or a paired phone's key, so every change here is Jack's."""
+        from helper import checklist, tools as toolmod
+        gate = self.runner.gate
+        cl, log = gate.checklists, gate.done_log
+        parts = [p for p in path.split("/") if p]   # v1, checklists, ...
+        if parts[1] == "done":
+            if method == "GET" and len(parts) == 2:
+                return 200, {"done": log.list()}
+            if method == "POST" and len(parts) == 4 and parts[3] == "undo":
+                row = log.take_undo(parts[2])
+                if row is None:
+                    return 404, {"error": "nothing to undo there"}
+                agent = self.agents.get(row["agent"])
+                ctx = toolmod.ToolContext(roots=agent.roots if agent else [], home=self.runner.home_root,
+                                          trash=self.runner.home_root / "trash")
+                try:
+                    text = toolmod.run_undo(row["undo"], ctx)
+                except Exception as e:  # noqa: BLE001 - shown to Jack
+                    return 409, {"error": f"Couldn't undo: {e}"}
+                self.runner.audit.write("system", event="undo", row=row["id"], tool=row["tool"], by=by)
+                return 200, {"undone": row["id"], "text": text}
+            return 404, {"error": "not found"}
+        if method == "GET" and len(parts) == 2:
+            return 200, {"agents": [cl.summary(a) for a in self.agents.values()], "presets": list(checklist.PRESETS),
+                         "history": cl.history(30)}
+        if method == "POST" and len(parts) == 4 and parts[2] == "undo":
+            entry = cl.undo(parts[3], by=by)
+            if entry is None:
+                return 404, {"error": "nothing to undo there"}
+            self.runner.audit.write("system", event="checklist_undo", change=parts[3], by=by)
+            return 200, {"change": entry}
+        agent = self.agents.get(parts[2]) if len(parts) == 3 else None
+        if agent is None:
+            return 404, {"error": "no such agent"}
+        if method == "GET":
+            return 200, {**cl.summary(agent), "rows": cl.rows(agent),
+                         "history": [h for h in cl.history(100) if h["agent"] == agent.key][-20:]}
+        if method == "POST":
+            try:
+                if "preset" in body:
+                    entry = cl.preset(agent, str(body["preset"]), by=by)
+                elif "not_sure_stop" in body:
+                    entry = cl.set_not_sure(agent, bool(body["not_sure_stop"]), by=by)
+                else:
+                    entry = cl.set(agent, str(body.get("job", "")), str(body.get("choice", "")), by=by)
+            except ValueError as e:
+                return 400, {"error": str(e)}
+            self.runner.audit.write("system", event="checklist_change", agent=agent.key, change=entry["id"],
+                                    why=entry["why"], by=by)
+            return 200, {"change": entry, "rows": cl.rows(agent)}
+        return 404, {"error": "not found"}
+
+    def handle_ledger(self, method: str, path: str, body: dict, section: str = "lore") -> tuple[int, dict]:
+        """Guild Ledger panel (lore, or Jack's private records). Promote and retire here are Jack's own
+        clicks, so they count as approval."""
         from helper.ledger import LedgerStore, report
-        store = LedgerStore(self.runner.home_root / "state" / "lore_ledger.json")
+        store = LedgerStore.for_home(self.runner.home_root, section)
         if method == "GET" and path == "/v1/ledger":
             led = store.load()
-            return 200, {"revision": led["revision"], "report": report(led), "entries": led["entries"]}
+            return 200, {"section": section, "revision": led["revision"], "report": report(led, section),
+                         "entries": led["entries"]}
         parts = path.split("/")
         if method == "POST" and len(parts) == 5 and parts[4] in ("promote", "retire"):
             eid = parts[3]
@@ -180,7 +368,7 @@ class App:
             res = store.apply({"reason": reason, "ops": [op]}, approved=True)
             if "errors" in res:
                 return 400, {"error": " ".join(res["errors"])}
-            self.runner.audit.write("system", event="ledger_" + parts[4], entry=eid, by="ui:web")
+            self.runner.audit.write("system", event=f"{section}_" + parts[4], entry=eid, by="ui:pc")
             return 200, {"revision": res["ledger"]["revision"], "notes": res["notes"]}
         return 404, {"error": "not found"}
 
@@ -261,12 +449,6 @@ def make_handler(app: App):
             if not self._guard():
                 return
             path = urlparse(self.path).path
-            if path in STATIC:
-                f = WEB / STATIC[path]
-                ctype = mimetypes.guess_type(f.name)[0] or "application/octet-stream"
-                if f.suffix == ".webmanifest":
-                    ctype = "application/manifest+json"
-                return self._send(200, f.read_bytes(), ctype + ("; charset=utf-8" if ctype.startswith("text") else ""))
             if not path.startswith("/v1/"):
                 return self._json(404, {"error": "not found"})
             if self._authed():

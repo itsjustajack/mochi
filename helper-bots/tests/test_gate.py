@@ -39,9 +39,10 @@ class GateTests(unittest.TestCase):
     def test_tier2_asks_when_not_allowlisted(self):
         self.assertEqual(self.check("write_file", {"path": "b.txt", "text": "x"}).verdict, "ask")
 
-    def test_tainted_tier2_off_allowlist_denied(self):
+    def test_tainted_tier2_asks_with_warning(self):
         d = self.check("write_file", {"path": "b.txt", "text": "x"}, tainted=True)
-        self.assertEqual(d.verdict, "deny")
+        self.assertEqual(d.verdict, "ask")
+        self.assertIn("outside text", d.reason)
 
     def test_tainted_task_never_gets_tier3_without_asking(self):
         d = self.check("delete_file", {"path": "a.txt"}, tainted=True)

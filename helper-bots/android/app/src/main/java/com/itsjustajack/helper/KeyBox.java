@@ -15,13 +15,15 @@ import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;
 
 /**
- * Keeps helperd's key encrypted with AES-256-GCM, using a key that lives in the Android Keystore
- * (the same idea as Stub's KeyLock). Only the last 4 characters are ever shown.
+ * Keeps the phone's device key (from pairing) and the notes key encrypted with AES-256-GCM, using
+ * a key that lives in the Android Keystore (the same idea as Stub's KeyLock). Only the last 4
+ * characters are ever shown.
  */
 final class KeyBox {
     private static final String ALIAS = "helper-key-v1";
     private static final String PREFS = "helper";
     private static final String FIELD = "enc_key";
+    private static final String NOTES_FIELD = "enc_notes_key";
 
     private KeyBox() {}
 
@@ -42,17 +44,37 @@ final class KeyBox {
     }
 
     static void save(Context c, String key) throws Exception {
+        saveField(c, FIELD, key);
+    }
+
+    static void saveNotesKey(Context c, String b64) throws Exception {
+        saveField(c, NOTES_FIELD, b64);
+    }
+
+    /** The 32-byte key shared with the PC for encrypting notes, or null. */
+    static byte[] notesKey(Context c) {
+        String b64 = loadField(c, NOTES_FIELD);
+        if (b64 == null) return null;
+        byte[] k = Base64.decode(b64, Base64.NO_WRAP);
+        return k.length == 32 ? k : null;
+    }
+
+    private static void saveField(Context c, String field, String key) throws Exception {
         Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
         cipher.init(Cipher.ENCRYPT_MODE, masterKey());
         byte[] iv = cipher.getIV();
         byte[] ct = cipher.doFinal(key.getBytes(StandardCharsets.UTF_8));
         String packed = Base64.encodeToString(iv, Base64.NO_WRAP) + ":" + Base64.encodeToString(ct, Base64.NO_WRAP);
-        prefs(c).edit().putString(FIELD, packed).apply();
+        prefs(c).edit().putString(field, packed).apply();
     }
 
-    /** The key, or null if none is saved or it can no longer be decrypted. */
+    /** The device key, or null if none is saved or it can no longer be decrypted. */
     static String load(Context c) {
-        String packed = prefs(c).getString(FIELD, null);
+        return loadField(c, FIELD);
+    }
+
+    private static String loadField(Context c, String field) {
+        String packed = prefs(c).getString(field, null);
         if (packed == null) return null;
         try {
             String[] parts = packed.split(":", 2);
@@ -66,7 +88,7 @@ final class KeyBox {
     }
 
     static void clear(Context c) {
-        prefs(c).edit().remove(FIELD).apply();
+        prefs(c).edit().remove(FIELD).remove(NOTES_FIELD).remove("pc_host").remove("pc_port").apply();
     }
 
     static String hint(String key) {

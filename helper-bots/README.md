@@ -1,141 +1,144 @@
-# Helper (v0.1, first working core)
+# Helper (v0.2)
 
-Free, local helper bots for Jack's Windows PC and Android phone (Termux). The model is treated as
-untrusted: it can only *propose* one tool call at a time, and a small permission gate in plain Python
-decides whether that call runs, using policy files the bots cannot edit.
+Free, local helper bots for Jack's Windows PC and Android phone. The model (Qwen in Ollama, free)
+is treated as untrusted: it can only *propose* one tool call at a time, and a permission gate in
+plain Python decides whether that call runs, using Jack's own settings, which the bots can't edit.
 
-This first version is the core from build steps 1 to 3 of the design doc: model client, agent config,
-the gate, the task loop, the audit log, a local web app with approval cards, and a CLI.
-It uses the Python standard library only, so it installs the same way in Termux and on Windows.
+- **Windows:** `Helper.exe`, a real desktop app with its own icon. No browser page.
+- **Phone:** `Helper.apk`, a normal app with real screens. Nothing to set up in Termux. It talks to
+  the PC over Stub Link (home Wi-Fi, or Tailscale when away).
+- Standard library Python only. No paid AI, no hosting, no update server: you update by replacing
+  the file (`Helper.exe`, or installing the new `Helper.apk` over the old one).
 
-## What works now
+## Get the apps
 
-- **Permission gate** (`helper/gate.py`): every tool call goes through the same checks in order:
-  known tool, valid arguments and folders, kill switch, policy integrity hash, rate limit,
-  tier rule with taint and approval-fatigue rules, then an audit record before anything runs.
-  Tier 3 always asks. There is no "always allow" button and no shell tool.
-- **Policy you control** (`~/.helper/policy/`): `tiers.toml`, `allowlist.toml`, `content.toml`.
-  Edit them by hand, then run `helper policy approve`. Until you do, every tier 2 and 3 action is refused.
-- **Family-friendly rule locked in**: `content.toml` only accepts `adult_content = "never"`, and the rule
-  is the first line of every agent's prompt. No setting, agent or task can remove it.
-- **Agents you can customise** (`~/.helper/agents/<name>/agent.toml`): name, colour, emoji avatar, role,
-  tools, folders, limits, model and temperature. Starter agents: Organizer, Notes, Storyteller (dice).
-  Each layer can only narrow the one above (policy > settings.toml > agent.toml > task);
-  anything capped is listed by `helper agents`.
-- **Ollama client** (`helper/runtime.py`): talks to the one shared Ollama on `127.0.0.1:11434`
-  with a JSON schema, so the model can only name tools it was offered. A model address that is not
-  `127.0.0.1` is refused unless it has a key (never an open Ollama on Wi-Fi).
-- **Untrusted text handling**: tool results are sanitised (ChatML tokens, role look-alikes, control
-  characters) and wrapped in `<untrusted>` tags. Text that looks like an injection marks the task
-  suspicious, after which even allowlisted changes need your OK. Three refusals in one task stop it.
-- **Undo**: writes, moves and deletes keep a copy in `~/.helper/trash/`.
-- **Web app** on `127.0.0.1:8765`: avatar rail, agent pill, chat bubbles, step lines, Draft cards with
-  *Approve once / Discard / Stop task*, a Stop-all button, and a phone layout. Every API route needs the
-  key, the Host header is checked, there is no CORS, and a strict Content-Security-Policy is set.
+Every push builds both. Open the repo's **Actions** tab, pick the newest "Helper" run, and download
+**Helper-windows** (`Helper.exe`) and **Helper-phone** (`Helper.apk`) from *Artifacts* at the bottom.
+There is no GitHub release page any more.
 
-## The phone app (Helper.apk)
+- **Windows:** put `Helper.exe` anywhere and open it. The first start makes `C:\BotWork\.helper`
+  with the default policy and agents. Install [Ollama](https://ollama.com) and run
+  `ollama pull qwen3:8b` once. To update, close Helper and replace `Helper.exe`; your settings stay.
+- **Phone:** install `Helper.apk` (switch Auto Blocker off just for the install). On the PC open
+  Settings › Phone link, type the PC's Wi-Fi address, turn it on, restart Helper, press
+  *Link a new phone*, and type the code in the phone app. Installing a newer APK over the old one
+  keeps everything.
 
-`android/` is a small Android app (Android 11+, no third-party libraries). It contains no model and no
-tools. It shows the engine's own app from `127.0.0.1` in a locked-down WebView and adds what a web page
-can't do:
-
-- **Approve with your fingerprint or PIN.** Approve once opens Android's check, which shows the action
-  as the engine reports it. Deny and Stop need no check because they only reduce what the bots do.
-- **Notifications** when an agent needs your OK. They name the agent and action only, with no file names,
-  and have a Deny button. Review opens the full card.
-- **A home-screen widget** that shows the status and how many requests are waiting, with Open and Stop all.
-- **A quick-settings tile** that stops every task.
-- **Share to Helper**, which puts shared text in the message box. It never runs by itself.
-- **A Start Helper in Termux button** for when the engine isn't running.
-
-The key is stored encrypted with a key held in the Android Keystore, and `allowBackup` is off. The
-WebView can only load `127.0.0.1` and has file access turned off.
-
-**Install on the phone.** Every push builds the app. Open the "Helper for Android (latest build)"
-release on GitHub and download `Helper.apk`, `helper-engine.zip` and `install-termux.sh`. Then in
-Termux run `termux-setup-storage`, then `cd ~/storage/downloads && bash install-termux*.sh`. Install
-the APK, open it and paste the key; the script copies the key for you.
-
-**Signing key (once).** So that each new build installs over the old one, the app is signed with
-your own key, kept as a GitHub secret and never in the repo. On the PC:
+**Signing key (once).** So each new APK installs over the last one, it's signed with your own key,
+kept as a GitHub secret and never in the repo:
 
 ```
 keytool -genkeypair -keystore helper.keystore -alias helper -keyalg RSA -keysize 3072 -validity 10000 -dname "CN=Helper"
 base64 -w0 helper.keystore     # PowerShell: [Convert]::ToBase64String([IO.File]::ReadAllBytes("helper.keystore"))
 ```
 
-Add two repository secrets (Settings > Secrets and variables > Actions): `HELPER_KEYSTORE_B64` (the
-base64 text) and `HELPER_KEYSTORE_PASSWORD`. Keep `helper.keystore` somewhere safe. Until the
-secrets are set, builds use a throwaway key and the build log shows a warning. Each build prints its
-signing fingerprint so you can check it.
+Add two repository secrets (Settings › Secrets and variables › Actions): `HELPER_KEYSTORE_B64` and
+`HELPER_KEYSTORE_PASSWORD`. Keep `helper.keystore` safe.
+
+## Your checklists: Do, Ask me or Never
+
+Every job an agent can do is a row in **Settings › Agents**, set to **Do** (on its own), **Ask me**
+or **Never**. Nothing is locked: sending email, deleting, making a Ledger card real, all of it is your
+choice per agent.
+
+- Rows you haven't touched start safe: reading is Do, anything that changes things is Ask me.
+- **Presets** set a whole agent in one tap: Careful, Normal, Hands-off.
+- **Always** on any OK card approves it and sets that job to Do for that agent.
+- **"From now on…"**: type "Inbox, from now on archive newsletters" or "never delete files" and the
+  row changes straight away, with Undo. Only your own typed message does this, never an email, a web
+  page or the model.
+- **Not sure? Stop** (on by default, per agent): after an agent reads an email or web page, even its
+  Do jobs ask first, because that text could be trying to steer it.
+- **Done for you**: everything agents did on their own, with **Undo** (files, email archive / label /
+  bin, drafts, Trello cards, reminders).
+- **Stop all** is on every screen, on the phone widget and in the quick-settings tile.
+- The only fixed rules: no sexual content involving minors or anyone childlike, and none about real
+  people. They hold in every mode.
+
+## Today and Calm mode
+
+Built to work on a bad-brain day.
+
+- **Needs you**: OK cards and reminders, urgent first. **Just one thing** shows the single easiest
+  next step. **Too much** shows only the top 3 and holds the rest (nothing is lost).
+- **Reminders** each carry a tiny first step ("Find the number"). Snooze: 1 hour, tonight, tomorrow,
+  or "when I'm at the PC". Missed ones move quietly to tomorrow: no red counters, no guilt.
+- **Brain dump** (phone or PC): dump everything, then tick the real tasks; each becomes a reminder.
+- **Quiet hours**, a fixed **morning readout** time, and Pip's quests and XP (off unless you turn
+  them on), in Settings › Calm mode.
+
+## Email, accounts and records
+
+- **Gmail** (Settings › Accounts › Link): you sign in with Google in your own browser. It starts
+  **read-only**: Inbox sorts mail into *Needs you, Waiting on others, Receipts, Newsletters* and
+  *Scam?*, and writes the morning readout. *Allow changes* links again so agents can draft, archive,
+  label, bin and send, each still a row on the checklist. Needs a free Google Cloud "Desktop app"
+  OAuth client: console.cloud.google.com › APIs › enable Gmail API › Credentials › Create OAuth
+  client ID › Desktop app; paste its ID and secret when Helper asks. Or `helper link gmail --client-id
+  ID --client-secret SECRET`.
+- **Trello**: get your key at trello.com/power-ups/admin, press Link, allow, paste the token.
+- Sign-ins live in **Windows Credential Manager**. *Unlink* removes them at once.
+- Email text is untrusted: agents never follow instructions in an email and never open its links.
+  Unsubscribing only uses the list's own unsubscribe email, and never for anything Ward flagged.
+- **Your records** (Records tab) are a private section of the Guild Ledger for real life: accounts,
+  people, documents, routines. Kept apart from story lore, never shown to story agents, and a record
+  that contains a password, PIN, code or card number is refused. Records say *where* a password lives
+  ("in RoboForm"), never the password. RoboForm isn't linked: whether it allows linking is unchecked.
+
+Agents: **Pip** (one thing at a time, plain-English letters, phone-call scripts), **Inbox** (email),
+**Vault** (account map), **Ward** (scam and account checks, defensive only), **Quill** (Ledger and
+records), plus Organizer, Notes, Storyteller, Jace (code check) and Deep Research.
+
+## Phone notes are encrypted
+
+A brain dump note is encrypted on the phone the moment you save it (ChaCha20-Poly1305 with a key the
+PC gives the phone when it pairs). It goes to the PC over Stub Link, or, with no connection, waits on
+the phone until you tap *Save to Drive* and pick a Drive folder. Set that folder as
+`[capture] folder = "G:/My Drive/Helper/Capture"` in `settings.toml` and the PC picks notes up from
+there. Drive only ever sees scrambled bytes.
 
 ## Stub Link (phone to PC)
 
-The private connection between your phone and this PC. It is off until you turn it on.
+Pairing uses a one-time code (works once, for 5 minutes, stops after 5 wrong tries). Each phone gets
+its own key; the PC keeps only a hash. A paired phone can do what the PC app does (chat, OK cards,
+Stop all, Settings, reminders, records) except pair or remove devices, which stay on the PC.
+Approve and Always ask for your fingerprint or PIN first, and Settings opens with one.
 
-1. In `settings.toml`, set `[link] enabled = true` and `host` to this PC's home Wi-Fi address
-   (for example `192.168.1.20`). It never listens on every address.
-2. Run `helper serve`, open the app, press the ⇄ button, then **Make a pairing code**.
-3. The phone sends that code once to `POST /v2/pair` and gets its own key. The code works once,
-   for 5 minutes, and stops after 5 wrong tries. Only a hash of each key is kept on the PC.
-4. Remove a device from the same panel at any time; its key stops working at once.
-
-A linked device can only: check the PC is awake (`GET /v2/health`), send a job (`POST /v2/jobs`),
-follow its own jobs (`GET /v2/jobs/{id}`) and see how many approvals are waiting (`GET /v2/approvals`).
-It can't approve, stop, change settings or see keys. Those stay on the PC.
-
-Not yet: drawing the QR code (the panel shows the code and the QR data), the phone's Link to PC
-screen, Ledger sync, the Drive fallback, and an encrypted (TLS) connection. Until TLS lands, use it
-on your own home Wi-Fi only.
-
-## Skills in this version
-
-- **Code check** (Jace): finds problems in Python, Bash, JavaScript, Janitor ES5 scripts and JSON and
-  explains them in plain English. It never runs the code. Tool `check_code`, API `POST /v1/code/check`.
-- **Deep research** (Deep Research agent): Jack's Deep Tactical Research Agent, v3.2 and v3.3 merged.
-  Ask a question to get a plan, say "go" for the cited report, "quick" for a short answer,
-  "go deeper on angle 2" or "show notes" to follow up.
-- **Guild Ledger** (Quill): the shared store, built to the same rules as Jack's lore_tool.js. Agents
-  add drafts; only Jack's click makes canon (`POST /v1/ledger/<id>/promote`).
+Not yet: the QR code, TLS on the link (until then, use home Wi-Fi or Tailscale only), and Windows Hello
+for the PC's Settings.
 
 ## Google Drive, rules and the content switch
 
 1. Install **Google Drive for desktop** (free). Drive appears as a folder, for example `G:\My Drive`.
 2. In `policy/allowlist.toml` list the folders agents may read, and the docs that are their rules:
-   `knowledge = ["G:/My Drive/Helper"]` and
-   `rule_docs = ["G:/My Drive/Helper/Guild_Prompt.txt"]`, then run `helper policy approve`.
-3. Agents with `knowledge_search` / `knowledge_read` can search and read those folders, never write.
-   What they learn is filed as a Ledger draft for your tap.
-4. Rule docs are snapshotted when you approve. If one changes in Drive, agents keep the approved copy
-   until you approve again. A doc that tells agents to drop their rules can't be approved.
-5. The content switch: `policy/content.toml` `adult_content = "switch"` lets you turn on
-   Unfiltered 18+ from the app (`POST /v1/content {"mode": "unfiltered"}`); it goes back to Filtered
-   after `unfiltered_minutes`. Agents with `always_filtered = true` ignore it. Two limits hold in every
-   mode: no sexual content involving minors or anyone childlike, and none about real people.
+   `knowledge = ["G:/My Drive/Helper"]` and `rule_docs = ["G:/My Drive/Helper/Guild_Prompt.txt"]`,
+   then run `helper policy approve`.
+3. Agents can search and read those folders, never write. What they learn is filed as a draft for your tap.
+4. Rule docs are snapshotted when you approve. A doc that tells agents to drop their rules can't be one.
+5. **Content** (Settings › Content & rules): Unfiltered 18+ turns itself back to Filtered after a while.
+   Email and other outward agents always stay Filtered.
 
-Google Docs files show up in Drive for desktop as `.gdoc` shortcuts with no text. Save notes you want
-Helper to read as `.txt` or `.md`.
+Google Docs show up in Drive for desktop as `.gdoc` shortcuts with no text. Save notes you want Helper
+to read as `.txt` or `.md`.
 
-## Not in this version yet
+## Skills
 
-Memory (SQLite), skills and the sandbox, more widgets (Ask bar, Quick actions, Profile), Windows tray and
-toasts, Settings screen, reminders, sync between devices, the Muse model route, the consistency-check
-model call, and the eval set. These follow the build order in the design doc.
+- **Code check** (Jace): finds problems in Python, Bash, JavaScript, Janitor ES5 scripts and JSON and
+  explains them plainly. It never runs the code.
+- **Deep research**: Jack's Deep Tactical Research Agent, v3.2 and v3.3 merged. Ask for a plan, say "go".
+- **Guild Ledger** (Quill): the shared store, built to the rules of Jack's lore_tool.js.
 
-## Try it on the PC
+## From the command line (optional)
 
 ```powershell
-# Python 3.11 or newer, and Ollama already installed
-ollama pull qwen3:8b
 cd helper-bots
-python -m helper init          # creates C:\BotWork\.helper (or ~/.helper) and approves the policy
-python -m helper status        # checks the model and the policy
+python -m helper.desktop          # the Windows app, from source
+python -m helper init             # make the Helper folder without opening the app
 python -m helper ask "list what is in my work folder"
-python -m helper serve         # then open the link it prints once
+python -m helper serve            # the engine without a window
+python -m helper link gmail --client-id ID --client-secret SECRET
+python -m helper stop             # Stop all, from a terminal
 ```
-
-On the phone, use `scripts/install-termux.sh` (see below). It installs Python and Ollama, sets
-`qwen3:4b`, and adds a Termux:Boot start script. Files the bots may touch go in `~/.helper/work/`.
 
 ## Tests
 
@@ -143,7 +146,7 @@ On the phone, use `scripts/install-termux.sh` (see below). It installs Python an
 python -m unittest discover -s tests -t .
 ```
 
-The gate tests cover: tier 3 always asks, tainted tasks never get tier 2 off the allowlist, paths outside
-the folders and symlink escapes are refused, the policy, settings, agents and key folders are refused
-even if listed as allowed, edits to the policy block changes until re-approved, the kill switch, the rate
-limit and approval fatigue. The loop tests include a model that tries to rewrite its own policy.
+They cover the gate (checklists, Never, Not sure? Stop, protected folders, symlink escapes, the kill
+switch, policy integrity, rate limits, approval fatigue), "from now on" parsing, Undo, the private
+records' password check, note encryption (RFC 8439 test vector), the phone link's routes, Gmail sorting
+and scam signs with a fake Google, the scheduler, and the Windows app's engine.
