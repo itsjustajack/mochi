@@ -20,9 +20,14 @@ max_tokens = 30000
 host = "127.0.0.1"
 port = 8765
 
+# Encrypted brain dump notes the phone saved to Drive (".hln" files). The PC picks them up from here.
+# For example: folder = "G:/My Drive/Helper/Capture"
+[capture]
+folder = ""
+
 # Stub Link: lets your phone send jobs to this PC over home Wi-Fi. Off until you turn it on.
 # host = this PC's Wi-Fi address (for example 192.168.1.20). Never 0.0.0.0.
-# Pair the phone from the Phone link panel in the app; each device gets its own key.
+# Turn it on in the app (Settings > Phone link); each paired phone gets its own key.
 [link]
 enabled = false
 host = ""

@@ -4,7 +4,6 @@ import android.Manifest;
 import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.PackageManager;
-import android.graphics.Bitmap;
 import android.hardware.biometrics.BiometricManager;
 import android.hardware.biometrics.BiometricPrompt;
 import android.net.Uri;
@@ -13,54 +12,75 @@ import android.os.Bundle;
 import android.os.CancellationSignal;
 import android.os.Handler;
 import android.os.Looper;
+import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
-import android.view.ViewGroup;
-import android.webkit.JavascriptInterface;
-import android.webkit.WebChromeClient;
-import android.webkit.WebResourceError;
-import android.webkit.WebResourceRequest;
-import android.webkit.WebResourceResponse;
-import android.webkit.WebSettings;
-import android.webkit.WebView;
-import android.webkit.WebViewClient;
+import android.widget.Button;
+import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.io.ByteArrayInputStream;
-import java.net.URLEncoder;
+import java.io.File;
+import java.io.OutputStream;
+import java.nio.file.Files;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * Helper's phone front end. It shows helperd's own web app (running in Termux on 127.0.0.1)
- * in a locked-down WebView, and adds what a web page can't do: a fingerprint/PIN check before
- * Approve, notifications, a share target, a home-screen widget and a quick-settings Stop tile.
- * It holds no model and no tools; every action still goes through helperd's gate.
+ * Helper on the phone: real screens, no web page. It talks to Helper on the PC over Stub Link.
+ *
+ * Tabs: Chat (the Guild, OK cards), Today (Needs you, Just one thing, Too much, reminders),
+ * Note (brain dump, encrypted on the phone, works offline) and Settings (agents' Do / Ask me / Never
+ * rows, presets, Calm mode). Stop all is on every screen. Approve and Always ask for a fingerprint
+ * or PIN first, and Settings opens with one. No model or tools live here: the PC's gate checks all.
  */
 public class MainActivity extends Activity {
-    private WebView web;
-    private View offline;
-    private TextView offlineMsg;
-    private FrameLayout root;
-    private String pendingShare;
-    private boolean loadedOnce;
+    private static final int REQ_SAVE_DRIVE = 41;
+    private static final String[] CHOICES = {"never", "ask", "do"};
+    private static final String[] CHOICE_WORDS = {"Never", "Ask me", "Do"};
+    private static final int[] CHOICE_COLORS = {Ui.BAD, Ui.WARN, Ui.OK};
+
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService io = Executors.newSingleThreadExecutor();
+    private FrameLayout content;
+    private TextView title, okPill, stopBtn, dot;
+    private String tab = "chat";
+    private String agent = null;
+    private JSONArray agents = new JSONArray();
+    private String settingsAgent = null;
+    private boolean settingsUnlocked = false;
+    private String pendingShare;
+    private String lastSig = "";
+    private File driveFile;
+    private final Runnable poll = new Runnable() {
+        @Override
+        public void run() {
+            refresh(false);
+            main.postDelayed(this, 3000);
+        }
+    };
+
+    // ------------------------------------------------------------------ lifecycle
 
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
         Ui.channels(this);
-        WebView.setWebContentsDebuggingEnabled(false);
-        root = new FrameLayout(this);
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(Ui.BG);
         root.setFitsSystemWindows(true);
+        root.addView(topBar());
+        content = new FrameLayout(this);
+        root.addView(content, new LinearLayout.LayoutParams(-1, 0, 1));
+        root.addView(bottomBar());
         setContentView(root);
         takeShare(getIntent());
     }
@@ -68,14 +88,13 @@ public class MainActivity extends Activity {
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
-        if (takeShare(intent) && web != null) load();
+        if (takeShare(intent)) show("chat");
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        Api api = Api.from(this);
-        if (api == null) {
+        if (Api.from(this) == null) {
             startActivity(new Intent(this, SetupActivity.class));
             return;
         }
@@ -84,25 +103,23 @@ public class MainActivity extends Activity {
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 7);
         }
         WatchService.startIfWanted(this);
-        if (web == null) buildWeb();
-        if (!loadedOnce || pendingShare != null) load();
-        else web.evaluateJavascript("window.helperRefresh && helperRefresh()", null);
+        loadAgents();
+        io.execute(() -> Notes.sendQueued(this));
+        main.removeCallbacks(poll);
+        main.post(poll);
+    }
+
+    @Override
+    protected void onPause() {
+        main.removeCallbacks(poll);
+        settingsUnlocked = false;
+        super.onPause();
     }
 
     @Override
     protected void onDestroy() {
         io.shutdownNow();
-        if (web != null) {
-            web.removeJavascriptInterface("HelperApp");
-            web.destroy();
-        }
         super.onDestroy();
-    }
-
-    @Override
-    public void onBackPressed() {
-        if (web != null && web.canGoBack()) web.goBack();
-        else super.onBackPressed();
     }
 
     private boolean takeShare(Intent i) {
@@ -117,221 +134,633 @@ public class MainActivity extends Activity {
         return false;
     }
 
-    // ------------------------------------------------------------------ WebView
+    // ------------------------------------------------------------------ frame
 
-    private boolean isHelperUrl(Uri u) {
-        return u != null && "http".equals(u.getScheme()) && Api.HOST.equals(u.getHost())
-                && u.getPort() == Api.port(this);
+    private View topBar() {
+        LinearLayout bar = row();
+        bar.setBackgroundColor(Ui.PANEL);
+        int p = Ui.dp(this, 10);
+        bar.setPadding(Ui.dp(this, 16), p, p, p);
+        title = Ui.text(this, "Helper", 18, Ui.TEXT, true);
+        bar.addView(title);
+        dot = Ui.text(this, "  ●", 14, Ui.MUTED, false);
+        bar.addView(dot, new LinearLayout.LayoutParams(0, -2, 1));
+        okPill = Ui.chip(this, "OK: 0", Ui.WARN, false);
+        okPill.setOnClickListener(v -> show("today"));
+        bar.addView(okPill);
+        stopBtn = Ui.chip(this, "Stop all", Ui.BAD, true);
+        stopBtn.setOnClickListener(v -> stopOrStart());
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+        lp.leftMargin = Ui.dp(this, 8);
+        bar.addView(stopBtn, lp);
+        return bar;
     }
 
-    private void buildWeb() {
-        web = new WebView(this);
-        web.setBackgroundColor(Ui.BG);
-        WebSettings s = web.getSettings();
-        s.setJavaScriptEnabled(true);
-        s.setDomStorageEnabled(true);
-        s.setAllowFileAccess(false);
-        s.setAllowContentAccess(false);
-        s.setGeolocationEnabled(false);
-        s.setSupportMultipleWindows(false);
-        s.setJavaScriptCanOpenWindowsAutomatically(false);
-        s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-        s.setMediaPlaybackRequiresUserGesture(true);
-        s.setSafeBrowsingEnabled(true);
-        // Named actions only. The page can ask for an approval check; it cannot approve by itself.
-        web.addJavascriptInterface(new Bridge(), "HelperApp");
-        web.setWebChromeClient(new WebChromeClient());
-        web.setWebViewClient(new WebViewClient() {
-            @Override
-            public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest r) {
-                return !isHelperUrl(r.getUrl()); // anything else simply doesn't open
-            }
-
-            @Override
-            public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest r) {
-                if (isHelperUrl(r.getUrl())) return null;
-                return new WebResourceResponse("text/plain", "utf-8", 403, "Blocked", null,
-                        new ByteArrayInputStream("Offline".getBytes()));
-            }
-
-            @Override
-            public void onPageStarted(WebView v, String url, Bitmap icon) {
-                showOffline(false, null);
-            }
-
-            @Override
-            public void onReceivedError(WebView v, WebResourceRequest r, WebResourceError e) {
-                if (r.isForMainFrame()) {
-                    showOffline(true, "Helper's engine isn't running on this phone yet.");
-                }
-            }
-        });
-        root.addView(web, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        offline = buildOffline();
-        root.addView(offline, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        offline.setVisibility(View.GONE);
-    }
-
-    private void load() {
-        String key = KeyBox.load(this);
-        if (key == null) return;
-        // The key goes in the #fragment, which the WebView never sends over the network;
-        // the page saves it and clears it from the address bar straight away.
-        StringBuilder url = new StringBuilder(Api.baseUrl(this)).append("#key=").append(key);
-        try {
-            if (pendingShare != null) url.append("&share=").append(URLEncoder.encode(pendingShare, "UTF-8"));
-        } catch (Exception ignored) {
+    private View bottomBar() {
+        LinearLayout bar = row();
+        bar.setBackgroundColor(Ui.RAIL);
+        String[][] tabs = {{"chat", "Chat"}, {"today", "Today"}, {"note", "Note"}, {"settings", "Settings"}};
+        for (String[] t : tabs) {
+            TextView b = Ui.text(this, t[1], 14, Ui.MUTED, true);
+            b.setGravity(Gravity.CENTER);
+            b.setPadding(0, Ui.dp(this, 14), 0, Ui.dp(this, 14));
+            b.setTag(t[0]);
+            b.setOnClickListener(v -> show((String) v.getTag()));
+            bar.addView(b, new LinearLayout.LayoutParams(0, -2, 1));
         }
-        pendingShare = null;
-        loadedOnce = true;
-        web.loadUrl(url.toString());
+        return bar;
     }
 
-    // ------------------------------------------------------------------ offline screen
-
-    private View buildOffline() {
-        ScrollView scroll = new ScrollView(this);
-        scroll.setBackgroundColor(Ui.BG);
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setGravity(Gravity.CENTER_HORIZONTAL);
-        int p = Ui.dp(this, 24);
-        box.setPadding(p, Ui.dp(this, 64), p, p);
-        scroll.addView(box);
-
-        TextView face = Ui.text(this, "• •", 22, Ui.BG, true);
-        face.setGravity(Gravity.CENTER);
-        face.setBackground(Ui.round(this, Ui.ACCENT, 999, 0));
-        box.addView(face, new LinearLayout.LayoutParams(Ui.dp(this, 64), Ui.dp(this, 64)));
-
-        TextView title = Ui.text(this, "Helper isn't running", 22, Ui.TEXT, true);
-        title.setGravity(Gravity.CENTER);
-        title.setPadding(0, Ui.dp(this, 16), 0, Ui.dp(this, 8));
-        box.addView(title);
-
-        offlineMsg = Ui.text(this, "", 15, Ui.MUTED, false);
-        offlineMsg.setGravity(Gravity.CENTER);
-        box.addView(offlineMsg);
-
-        TextView how = Ui.text(this, "Start it from here, or open Termux and run:", 14, Ui.MUTED, false);
-        how.setPadding(0, Ui.dp(this, 20), 0, Ui.dp(this, 8));
-        box.addView(how);
-        box.addView(Ui.mono(this, "helper serve"));
-
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.topMargin = Ui.dp(this, 24);
-        android.widget.Button start = Ui.button(this, "Start Helper in Termux", true);
-        start.setOnClickListener(v -> {
-            String err = Termux.startHelper(this);
-            if (err != null) {
-                offlineMsg.setText(err);
-            } else {
-                offlineMsg.setText("Starting… this takes a few seconds.");
-                main.postDelayed(this::load, 3500);
-            }
-        });
-        box.addView(start, lp);
-
-        LinearLayout.LayoutParams lp2 = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp2.topMargin = Ui.dp(this, 10);
-        android.widget.Button retry = Ui.button(this, "Try again", false);
-        retry.setOnClickListener(v -> load());
-        box.addView(retry, lp2);
-
-        android.widget.Button setup = Ui.button(this, "Connection settings", false);
-        setup.setOnClickListener(v -> startActivity(new Intent(this, SetupActivity.class)));
-        LinearLayout.LayoutParams lp3 = new LinearLayout.LayoutParams(lp2);
-        box.addView(setup, lp3);
-        return scroll;
+    private LinearLayout row() {
+        LinearLayout r = new LinearLayout(this);
+        r.setOrientation(LinearLayout.HORIZONTAL);
+        r.setGravity(Gravity.CENTER_VERTICAL);
+        return r;
     }
 
-    private void showOffline(boolean show, String msg) {
-        if (offline == null) return;
-        offline.setVisibility(show ? View.VISIBLE : View.GONE);
-        if (msg != null) offlineMsg.setText(msg);
+    private LinearLayout column(ScrollView[] holder) {
+        ScrollView sv = new ScrollView(this);
+        sv.setFillViewport(true);
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        int p = Ui.dp(this, 12);
+        col.setPadding(p, p, p, p);
+        sv.addView(col);
+        content.removeAllViews();
+        content.addView(sv);
+        if (holder != null) holder[0] = sv;
+        return col;
     }
 
-    // ------------------------------------------------------------------ approve with fingerprint / PIN
+    private TextView card(LinearLayout parent, String text, boolean bold) {
+        TextView t = Ui.text(this, text, bold ? 15 : 14, bold ? Ui.TEXT : Ui.MUTED, bold);
+        parent.addView(t);
+        return t;
+    }
 
-    /** Called by the page's Approve once button. Shows the action as helperd reports it, not as the page says. */
-    private void approveWithCheck(String id) {
+    private LinearLayout box(LinearLayout parent, int stroke) {
+        LinearLayout b = new LinearLayout(this);
+        b.setOrientation(LinearLayout.VERTICAL);
+        b.setBackground(Ui.round(this, Ui.PANEL2, 12, stroke));
+        int p = Ui.dp(this, 12);
+        b.setPadding(p, p, p, p);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+        lp.bottomMargin = Ui.dp(this, 8);
+        parent.addView(b, lp);
+        return b;
+    }
+
+    private Button add(LinearLayout parent, Button b) {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+        lp.rightMargin = Ui.dp(this, 6);
+        lp.topMargin = Ui.dp(this, 6);
+        parent.addView(b, lp);
+        return b;
+    }
+
+    private void toast(String s) {
+        main.post(() -> Toast.makeText(this, s, Toast.LENGTH_SHORT).show());
+    }
+
+    /** Runs a call on the PC in the background, then `done` on the main thread with the answer. */
+    private interface Call { JSONObject run(Api api) throws Exception; }
+    private interface Done { void with(JSONObject res); }
+
+    private void bg(Call call, Done done) {
         Api api = Api.from(this);
         if (api == null) return;
         io.execute(() -> {
-            JSONObject a;
             try {
-                a = api.approval(id);
+                JSONObject res = call.run(api);
+                main.post(() -> { if (done != null) done.with(res); });
+            } catch (Api.HttpError e) {
+                toast(e.code == 401 ? "This phone isn't linked any more. Link it again." : e.getMessage());
             } catch (Exception e) {
-                a = null;
+                toast("Can't reach the PC right now.");
+                main.post(() -> dot.setTextColor(Ui.BAD));
             }
-            final JSONObject found = a;
-            main.post(() -> {
-                if (found == null) {
-                    Toast.makeText(this, "That request is no longer waiting.", Toast.LENGTH_SHORT).show();
-                    refreshPage();
-                    return;
-                }
-                askDevice(found, () -> io.execute(() -> {
-                    String err = null;
-                    try {
-                        api.decide(id, "approve");
-                    } catch (Exception e) {
-                        err = e.getMessage();
-                    }
-                    final String fe = err;
-                    main.post(() -> {
-                        if (fe != null) Toast.makeText(this, "Not approved: " + fe, Toast.LENGTH_LONG).show();
-                        refreshPage();
-                    });
-                }));
-            });
         });
     }
 
-    private void askDevice(JSONObject a, Runnable onOk) {
+    private void show(String t) {
+        if ("settings".equals(t) && !settingsUnlocked) {
+            unlock("Open Settings", "Settings change what your agents may do", () -> {
+                settingsUnlocked = true;
+                show("settings");
+            });
+            return;
+        }
+        tab = t;
+        lastSig = "";
+        refresh(true);
+    }
+
+    private void refresh(boolean force) {
+        bg(api -> api.get("/v1/status"), st -> {
+            int pend = st.optInt("pending", 0);
+            okPill.setText("OK: " + pend);
+            okPill.setBackground(Ui.round(this, pend > 0 ? Ui.WARN : Ui.LINE, 8, 0));
+            okPill.setTextColor(pend > 0 ? 0xFFFFFFFF : Ui.MUTED);
+            JSONObject model = st.optJSONObject("model");
+            dot.setTextColor(model != null && model.optBoolean("ok") ? Ui.OK : Ui.WARN);
+            boolean stopped = st.optBoolean("stopped");
+            stopBtn.setText(stopped ? "Start again" : "Stop all");
+            stopBtn.setBackground(Ui.round(this, stopped ? Ui.OK : Ui.BAD, 8, 0));
+        });
+        switch (tab) {
+            case "chat": drawChat(force); break;
+            case "today": if (force) drawToday(); break;
+            case "note": if (force) drawNote(); break;
+            case "settings": if (force) drawSettings(); break;
+            default: break;
+        }
+    }
+
+    private void stopOrStart() {
+        bg(api -> api.get("/v1/status"), st -> {
+            boolean stopped = st.optBoolean("stopped");
+            bg(api -> api.post(stopped ? "/v1/start" : "/v1/stop", null),
+                    r -> { toast(stopped ? "Helper can take jobs again." : "Stopped everything."); refresh(true); });
+        });
+    }
+
+    // ------------------------------------------------------------------ fingerprint / PIN
+
+    private void unlock(String what, String why, Runnable ok) {
         int auth = BiometricManager.Authenticators.BIOMETRIC_STRONG | BiometricManager.Authenticators.DEVICE_CREDENTIAL;
         BiometricManager bm = getSystemService(BiometricManager.class);
         if (bm == null || bm.canAuthenticate(auth) != BiometricManager.BIOMETRIC_SUCCESS) {
-            Toast.makeText(this, "Set a screen lock (PIN, pattern or fingerprint) to approve from the phone.", Toast.LENGTH_LONG).show();
-            refreshPage();
+            Toast.makeText(this, "Set a screen lock (PIN or fingerprint) first.", Toast.LENGTH_LONG).show();
             return;
         }
-        String detail = Api.describe(a, true) + "\nTier " + a.optInt("tier")
-                + (a.optBoolean("tainted") ? "\nWarning: this task read untrusted content." : "");
         BiometricPrompt prompt = new BiometricPrompt.Builder(this)
-                .setTitle("Approve once?")
-                .setSubtitle(a.optString("agent", "Helper") + " is waiting on you")
-                .setDescription(detail.length() > 900 ? detail.substring(0, 900) + "…" : detail)
+                .setTitle(what)
+                .setDescription(why.length() > 900 ? why.substring(0, 900) + "…" : why)
                 .setAllowedAuthenticators(auth)
                 .setConfirmationRequired(true)
                 .build();
         prompt.authenticate(new CancellationSignal(), getMainExecutor(), new BiometricPrompt.AuthenticationCallback() {
             @Override
             public void onAuthenticationSucceeded(BiometricPrompt.AuthenticationResult result) {
-                onOk.run();
-            }
-
-            @Override
-            public void onAuthenticationError(int code, CharSequence msg) {
-                refreshPage(); // cancelled: nothing approved, the card stays as it was
+                ok.run();
             }
         });
     }
 
-    private void refreshPage() {
-        if (web != null) web.evaluateJavascript("window.helperRefresh && helperRefresh()", null);
+    // ------------------------------------------------------------------ Chat
+
+    private void loadAgents() {
+        bg(api -> api.get("/v1/agents"), res -> {
+            agents = res.optJSONArray("agents");
+            if (agents == null) agents = new JSONArray();
+            if (agent == null) agent = res.optString("default", agents.length() > 0 ? agents.optJSONObject(0).optString("key") : null);
+            if (pendingShare != null) tab = "chat";
+            lastSig = "";
+            refresh(true);
+        });
     }
 
-    final class Bridge {
-        @JavascriptInterface
-        public boolean isApp() {
-            return true;
+    private String agentName(String key) {
+        for (int i = 0; i < agents.length(); i++) {
+            JSONObject a = agents.optJSONObject(i);
+            if (a != null && a.optString("key").equals(key)) return a.optString("name", key);
         }
+        return key == null ? "Helper" : key;
+    }
 
-        @JavascriptInterface
-        public void approve(String id) {
-            if (id == null || !id.matches("[A-Za-z0-9_\\-]{4,40}")) return;
-            main.post(() -> approveWithCheck(id));
+    private void drawChat(boolean force) {
+        bg(api -> api.get("/v1/tasks"), res -> {
+            JSONArray all = res.optJSONArray("tasks");
+            JSONArray mine = new JSONArray();
+            StringBuilder sig = new StringBuilder(agent == null ? "" : agent);
+            for (int i = 0; all != null && i < all.length(); i++) {
+                JSONObject t = all.optJSONObject(i);
+                if (t != null && t.optString("agent").equals(agent)) {
+                    mine.put(t);
+                    sig.append(t.optString("id")).append(t.optString("status")).append(t.optJSONArray("events").length());
+                }
+            }
+            if (!force && sig.toString().equals(lastSig)) return;
+            lastSig = sig.toString();
+            renderChat(mine);
+        });
+    }
+
+    private void renderChat(JSONArray tasks) {
+        title.setText(agentName(agent));
+        content.removeAllViews();
+        LinearLayout page = new LinearLayout(this);
+        page.setOrientation(LinearLayout.VERTICAL);
+        content.addView(page);
+
+        HorizontalScrollView hs = new HorizontalScrollView(this);
+        LinearLayout chips = row();
+        chips.setPadding(Ui.dp(this, 8), Ui.dp(this, 6), Ui.dp(this, 8), Ui.dp(this, 6));
+        hs.addView(chips);
+        for (int i = 0; i < agents.length(); i++) {
+            JSONObject a = agents.optJSONObject(i);
+            String key = a.optString("key");
+            int color = parseColor(a.optString("color"), Ui.ACCENT);
+            Button b = Ui.chip(this, a.optString("name"), color, key.equals(agent));
+            b.setOnClickListener(v -> { agent = key; lastSig = ""; drawChat(true); });
+            add(chips, b);
+        }
+        page.addView(hs);
+
+        ScrollView sv = new ScrollView(this);
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        int p = Ui.dp(this, 12);
+        col.setPadding(p, 0, p, p);
+        sv.addView(col);
+        page.addView(sv, new LinearLayout.LayoutParams(-1, 0, 1));
+        if (tasks.length() == 0) {
+            card(col, "Ask " + agentName(agent) + " something. \"from now on…\" changes what it may do on its own.", false);
+        }
+        for (int i = 0; i < tasks.length(); i++) {
+            JSONArray evs = tasks.optJSONObject(i).optJSONArray("events");
+            for (int j = 0; evs != null && j < evs.length(); j++) renderEvent(col, tasks.optJSONObject(i), evs.optJSONObject(j));
+        }
+        sv.post(() -> sv.fullScroll(View.FOCUS_DOWN));
+
+        LinearLayout input = row();
+        input.setBackgroundColor(Ui.PANEL);
+        input.setPadding(p, Ui.dp(this, 8), p, Ui.dp(this, 8));
+        EditText box = new EditText(this);
+        box.setHint("Message " + agentName(agent));
+        box.setHintTextColor(Ui.MUTED);
+        box.setTextColor(Ui.TEXT);
+        box.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        box.setMaxLines(5);
+        box.setBackground(Ui.round(this, Ui.PANEL2, 18, 0));
+        box.setPadding(p, Ui.dp(this, 8), p, Ui.dp(this, 8));
+        if (pendingShare != null) {
+            box.setText(pendingShare);  // shared text is never sent by itself
+            pendingShare = null;
+        }
+        input.addView(box, new LinearLayout.LayoutParams(0, -2, 1));
+        Button send = Ui.chip(this, "Send", Ui.ACCENT, true);
+        send.setOnClickListener(v -> {
+            String goal = box.getText().toString().trim();
+            if (goal.isEmpty()) return;
+            box.setText("");
+            bg(api -> api.post("/v1/tasks", new JSONObject().put("goal", goal).put("agent", agent)), r -> {
+                String a = r.optString("agent", agent);
+                if (!a.equals(agent)) agent = a;
+                lastSig = "";
+                drawChat(true);
+            });
+        });
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+        lp.leftMargin = Ui.dp(this, 8);
+        input.addView(send, lp);
+        page.addView(input);
+    }
+
+    private void bubble(LinearLayout col, String text, boolean mine, boolean small) {
+        TextView t = Ui.text(this, text, small ? 13 : 15, small ? Ui.MUTED : Ui.TEXT, false);
+        if (!small) {
+            t.setBackground(Ui.round(this, mine ? Ui.ACCENT : Ui.PANEL2, 14, 0));
+            int p = Ui.dp(this, 10);
+            t.setPadding(p, Ui.dp(this, 7), p, Ui.dp(this, 7));
+        }
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+        lp.gravity = mine ? Gravity.END : Gravity.START;
+        lp.topMargin = Ui.dp(this, 6);
+        if (!small) {
+            if (mine) lp.leftMargin = Ui.dp(this, 48);
+            else lp.rightMargin = Ui.dp(this, 48);
+        }
+        col.addView(t, lp);
+    }
+
+    private void renderEvent(LinearLayout col, JSONObject task, JSONObject ev) {
+        if (ev == null) return;
+        switch (ev.optString("kind")) {
+            case "user": bubble(col, ev.optString("text"), true, false); break;
+            case "step": bubble(col, "→ " + ev.optString("tool"), false, true); break;
+            case "result": bubble(col, (ev.optBoolean("ok") ? "✓ " : "✗ ") + cut(ev.optString("text"), 200), false, true); break;
+            case "denied": bubble(col, "Not done: " + ev.optString("reason"), false, true); break;
+            case "system": bubble(col, ev.optString("text"), false, true); break;
+            case "checklist":
+                bubble(col, "Checklist: \"" + ev.optString("label") + "\" is now " + word(ev.optString("choice")), false, true);
+                break;
+            case "approval": okCard(col, ev.optJSONObject("approval")); break;
+            case "end":
+                if (!ev.optString("text").isEmpty()) bubble(col, ev.optString("text"), false, false);
+                break;
+            default: break;
+        }
+    }
+
+    private void okCard(LinearLayout col, JSONObject a) {
+        if (a == null) return;
+        boolean tainted = a.optBoolean("tainted");
+        LinearLayout b = box(col, tainted ? Ui.WARN : Ui.LINE);
+        card(b, Api.describe(a, false), true);
+        JSONObject args = a.optJSONObject("args");
+        JSONArray names = args == null ? null : args.names();
+        for (int i = 0; names != null && i < names.length(); i++) {
+            card(b, names.optString(i) + ": " + cut(args.optString(names.optString(i)), 300), false);
+        }
+        TextView why = card(b, a.optString("reason"), false);
+        if (tainted) why.setTextColor(Ui.WARN);
+        String id = a.optString("id");
+        bg(api -> { JSONObject live = api.approval(id); return new JSONObject().put("live", live != null); }, r -> {
+            LinearLayout btns = row();
+            b.addView(btns);
+            if (!r.optBoolean("live")) {
+                card(b, "Answered", false);
+                return;
+            }
+            add(btns, Ui.chip(this, "Approve once", Ui.OK, true)).setOnClickListener(v ->
+                    unlock("Approve once?", Api.describe(a, true), () -> decide(id, "approve")));
+            add(btns, Ui.chip(this, "Always", Ui.LINE, true)).setOnClickListener(v ->
+                    unlock("Always allow this?", "Approve, and let " + a.optString("agent")
+                            + " do this job on its own from now on. You can change it in Settings.", () -> decide(id, "always")));
+            add(btns, Ui.chip(this, "No", Ui.LINE, true)).setOnClickListener(v -> decide(id, "deny"));
+            add(btns, Ui.chip(this, "Stop task", Ui.BAD, true)).setOnClickListener(v -> decide(id, "stop"));
+        });
+    }
+
+    private void decide(String id, String verdict) {
+        bg(api -> { api.decide(id, verdict); return new JSONObject(); }, r -> { lastSig = ""; refresh(true); });
+    }
+
+    // ------------------------------------------------------------------ Today
+
+    private void drawToday() {
+        title.setText("Today");
+        bg(api -> api.get("/v1/today"), d -> {
+            if (!"today".equals(tab)) return;
+            LinearLayout col = column(null);
+            LinearLayout top = row();
+            col.addView(top);
+            boolean tooMuch = d.optJSONObject("calm") != null && d.optJSONObject("calm").optBoolean("too_much");
+            add(top, Ui.chip(this, "Just one thing", Ui.OK, true)).setOnClickListener(v -> {
+                JSONObject one = d.optJSONObject("one_thing");
+                new android.app.AlertDialog.Builder(this).setTitle("Just one thing")
+                        .setMessage(one == null ? "Nothing needs you right now." :
+                                one.optString("text") + "\n\nFirst step: " + one.optString("first_step"))
+                        .setPositiveButton("OK", null).show();
+            });
+            add(top, Ui.chip(this, tooMuch ? "I'm OK now" : "Too much", Ui.LINE, true)).setOnClickListener(v ->
+                    bg(api -> api.post("/v1/calm", new JSONObject().put("too_much", !tooMuch)), r -> drawToday()));
+            add(top, Ui.chip(this, "+ Reminder", Ui.LINE, true)).setOnClickListener(v -> addReminder());
+            TextView h = Ui.text(this, "Needs you", 18, Ui.TEXT, true);
+            h.setPadding(0, Ui.dp(this, 14), 0, Ui.dp(this, 6));
+            col.addView(h);
+            JSONArray items = d.optJSONArray("items");
+            if (items == null || items.length() == 0) card(col, "Nothing right now. Nice.", false);
+            for (int i = 0; items != null && i < items.length(); i++) {
+                JSONObject it = items.optJSONObject(i);
+                LinearLayout b = box(col, 0);
+                card(b, it.optString("text"), true);
+                card(b, "First step: " + it.optString("first_step"), false);
+                LinearLayout btns = row();
+                b.addView(btns);
+                String id = it.optString("id");
+                if ("reminder".equals(it.optString("kind"))) {
+                    add(btns, Ui.chip(this, "Done", Ui.OK, true)).setOnClickListener(v -> rem(id, "done", ""));
+                    add(btns, Ui.chip(this, "Tonight", Ui.LINE, true)).setOnClickListener(v -> rem(id, "snooze", "tonight"));
+                    add(btns, Ui.chip(this, "Tomorrow", Ui.LINE, true)).setOnClickListener(v -> rem(id, "snooze", "tomorrow"));
+                    add(btns, Ui.chip(this, "At the PC", Ui.LINE, true)).setOnClickListener(v -> rem(id, "snooze", "at_pc"));
+                } else if ("ok".equals(it.optString("kind"))) {
+                    add(btns, Ui.chip(this, "Open", Ui.ACCENT, true)).setOnClickListener(v -> openApproval(id));
+                }
+            }
+            if (d.optInt("held") > 0) {
+                card(col, d.optInt("held") + " more are held until you're ready. Nothing is lost.", false);
+            }
+            int q = Notes.queued(this).size();
+            if (q > 0) card(col, q + " note" + (q > 1 ? "s" : "") + " waiting to reach the PC.", false);
+        });
+    }
+
+    private void rem(String id, String what, String choice) {
+        bg(api -> api.post("/v1/reminders/" + Api.enc(id) + "/" + what, new JSONObject().put("choice", choice)),
+                r -> drawToday());
+    }
+
+    private void addReminder() {
+        EditText e = new EditText(this);
+        e.setHint("What do you want reminding about?");
+        new android.app.AlertDialog.Builder(this).setTitle("Reminder").setView(e)
+                .setPositiveButton("Add", (dlg, w) -> {
+                    String text = e.getText().toString().trim();
+                    if (!text.isEmpty()) bg(api -> api.post("/v1/reminders", new JSONObject().put("text", text)), r -> drawToday());
+                })
+                .setNegativeButton("Cancel", null).show();
+    }
+
+    private void openApproval(String id) {
+        bg(api -> {
+            JSONObject a = api.approval(id);
+            if (a == null) return new JSONObject();
+            JSONObject t = api.get("/v1/tasks/" + Api.enc(a.optString("task_id")));
+            return new JSONObject().put("agent", t.optString("agent"));
+        }, r -> {
+            if (r.has("agent")) agent = r.optString("agent");
+            show("chat");
+        });
+    }
+
+    // ------------------------------------------------------------------ Note (brain dump)
+
+    private void drawNote() {
+        title.setText("Brain dump");
+        LinearLayout col = column(null);
+        card(col, "Dump everything. Messy is fine. It's locked on this phone before it goes anywhere, "
+                + "and works with no signal. On the PC you'll tick the real tasks.", false);
+        EditText e = new EditText(this);
+        e.setMinLines(8);
+        e.setGravity(Gravity.TOP);
+        e.setTextColor(Ui.TEXT);
+        e.setHintTextColor(Ui.MUTED);
+        e.setHint("call dentist, buy milk, reply to landlord…");
+        e.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        e.setBackground(Ui.round(this, Ui.PANEL2, 12, 0));
+        int p = Ui.dp(this, 12);
+        e.setPadding(p, p, p, p);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+        lp.topMargin = Ui.dp(this, 10);
+        col.addView(e, lp);
+        LinearLayout btns = row();
+        col.addView(btns);
+        TextView status = card(col, "", false);
+        add(btns, Ui.chip(this, "Save", Ui.OK, true)).setOnClickListener(v -> {
+            String text = e.getText().toString().trim();
+            if (text.isEmpty()) return;
+            try {
+                Notes.save(this, text);
+            } catch (Exception ex) {
+                status.setText(ex.getMessage());
+                return;
+            }
+            e.setText("");
+            status.setText("Saved and locked. Sending to the PC…");
+            io.execute(() -> {
+                int sent = Notes.sendQueued(this);
+                int left = Notes.queued(this).size();
+                main.post(() -> status.setText(sent > 0 && left == 0 ? "On the PC now." :
+                        left + " note" + (left == 1 ? "" : "s") + " waiting. They'll go when the PC is reachable, "
+                                + "or tap Save to Drive."));
+            });
+        });
+        add(btns, Ui.chip(this, "Save to Drive", Ui.LINE, true)).setOnClickListener(v -> saveToDrive());
+        int q = Notes.queued(this).size();
+        if (q > 0) status.setText(q + " note" + (q == 1 ? "" : "s") + " waiting to reach the PC.");
+    }
+
+    /** Puts the oldest waiting (already encrypted) note into a Drive folder Jack picks. */
+    private void saveToDrive() {
+        java.util.List<File> q = Notes.queued(this);
+        if (q.isEmpty()) {
+            toast("No notes waiting.");
+            return;
+        }
+        driveFile = q.get(0);
+        Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
+                .setType("application/octet-stream").putExtra(Intent.EXTRA_TITLE, driveFile.getName());
+        startActivityForResult(i, REQ_SAVE_DRIVE);
+    }
+
+    @Override
+    protected void onActivityResult(int req, int res, Intent data) {
+        super.onActivityResult(req, res, data);
+        if (req != REQ_SAVE_DRIVE || res != RESULT_OK || data == null || driveFile == null) return;
+        Uri uri = data.getData();
+        try (OutputStream out = getContentResolver().openOutputStream(uri)) {
+            out.write(Files.readAllBytes(driveFile.toPath()));
+            driveFile.delete();
+            toast("Saved to Drive (still locked). The PC will pick it up.");
+        } catch (Exception e) {
+            toast("Couldn't save it there.");
+        }
+        driveFile = null;
+        if ("note".equals(tab)) drawNote();
+    }
+
+    // ------------------------------------------------------------------ Settings
+
+    private void drawSettings() {
+        title.setText("Settings");
+        if (settingsAgent != null) {
+            drawAgentRows(settingsAgent);
+            return;
+        }
+        bg(api -> {
+            JSONObject all = new JSONObject();
+            all.put("checklists", api.get("/v1/checklists"));
+            all.put("calm", api.get("/v1/calm"));
+            return all;
+        }, d -> {
+            if (!"settings".equals(tab)) return;
+            LinearLayout col = column(null);
+            TextView h = Ui.text(this, "Agents", 18, Ui.TEXT, true);
+            col.addView(h);
+            JSONArray list = d.optJSONObject("checklists").optJSONArray("agents");
+            for (int i = 0; list != null && i < list.length(); i++) {
+                JSONObject a = list.optJSONObject(i);
+                LinearLayout b = box(col, 0);
+                card(b, a.optString("name"), true);
+                card(b, a.optString("text"), false);
+                String key = a.optString("agent");
+                b.setOnClickListener(v -> { settingsAgent = key; drawSettings(); });
+            }
+            JSONObject calm = d.optJSONObject("calm");
+            TextView c = Ui.text(this, "Calm mode", 18, Ui.TEXT, true);
+            c.setPadding(0, Ui.dp(this, 14), 0, Ui.dp(this, 4));
+            col.addView(c);
+            card(col, "Readout " + calm.optString("readout") + " · quiet hours " + calm.optString("quiet_start")
+                    + "–" + calm.optString("quiet_end") + " (change times on the PC)", false);
+            LinearLayout r = row();
+            col.addView(r);
+            boolean quests = calm.optBoolean("quests");
+            add(r, Ui.chip(this, "Quests and XP: " + (quests ? "On" : "Off"), Ui.OK, quests)).setOnClickListener(v ->
+                    bg(api -> api.post("/v1/calm", new JSONObject().put("quests", !quests)), x -> drawSettings()));
+            TextView l = Ui.text(this, "This phone", 18, Ui.TEXT, true);
+            l.setPadding(0, Ui.dp(this, 14), 0, Ui.dp(this, 4));
+            col.addView(l);
+            card(col, "Linked to " + KeyBox.prefs(this).getString("pc_host", "?") + " · key " + KeyBox.hint(KeyBox.load(this)), false);
+            LinearLayout r2 = row();
+            col.addView(r2);
+            boolean watch = WatchService.wanted(this);
+            add(r2, Ui.chip(this, "Notifications: " + (watch ? "On" : "Off"), Ui.OK, watch)).setOnClickListener(v -> {
+                KeyBox.prefs(this).edit().putBoolean("watch", !watch).apply();
+                if (watch) WatchService.stop(this); else WatchService.startIfWanted(this);
+                drawSettings();
+            });
+            add(r2, Ui.chip(this, "Unlink this phone", Ui.BAD, true)).setOnClickListener(v ->
+                    new android.app.AlertDialog.Builder(this).setTitle("Unlink?")
+                            .setMessage("This phone forgets its key. Remove it on the PC too (Settings › Phone link).")
+                            .setPositiveButton("Unlink", (dlg, w) -> {
+                                WatchService.stop(this);
+                                KeyBox.clear(this);
+                                startActivity(new Intent(this, SetupActivity.class));
+                            })
+                            .setNegativeButton("Cancel", null).show());
+        });
+    }
+
+    private void drawAgentRows(String key) {
+        bg(api -> api.get("/v1/checklists/" + Api.enc(key)), a -> {
+            if (!"settings".equals(tab)) return;
+            LinearLayout col = column(null);
+            LinearLayout head = row();
+            col.addView(head);
+            add(head, Ui.chip(this, "‹ Agents", Ui.LINE, true)).setOnClickListener(v -> { settingsAgent = null; drawSettings(); });
+            TextView name = Ui.text(this, "  " + a.optString("name"), 18, Ui.TEXT, true);
+            head.addView(name);
+            LinearLayout presets = row();
+            col.addView(presets);
+            String[][] ps = {{"careful", "Careful"}, {"normal", "Normal"}, {"handsoff", "Hands-off"}};
+            for (String[] p : ps) {
+                add(presets, Ui.chip(this, p[1], Ui.LINE, true)).setOnClickListener(v ->
+                        bg(api -> api.post("/v1/checklists/" + Api.enc(key), new JSONObject().put("preset", p[0])),
+                                r -> drawAgentRows(key)));
+            }
+            JSONArray rows = a.optJSONArray("rows");
+            for (int i = 0; rows != null && i < rows.length(); i++) {
+                JSONObject r = rows.optJSONObject(i);
+                LinearLayout b = box(col, 0);
+                card(b, r.optString("label"), true);
+                LinearLayout btns = row();
+                b.addView(btns);
+                for (int c = 0; c < CHOICES.length; c++) {
+                    String ch = CHOICES[c];
+                    boolean on = ch.equals(r.optString("choice"));
+                    add(btns, Ui.chip(this, CHOICE_WORDS[c], CHOICE_COLORS[c], on)).setOnClickListener(v ->
+                            bg(api -> api.post("/v1/checklists/" + Api.enc(key),
+                                    new JSONObject().put("job", r.optString("job")).put("choice", ch)), x -> drawAgentRows(key)));
+                }
+            }
+            boolean ns = a.optBoolean("not_sure_stop", true);
+            card(col, "Not sure? Stop: after reading an email or web page, even Do jobs ask first.", false);
+            LinearLayout r = row();
+            col.addView(r);
+            add(r, Ui.chip(this, ns ? "On" : "Off", Ui.OK, ns)).setOnClickListener(v ->
+                    bg(api -> api.post("/v1/checklists/" + Api.enc(key), new JSONObject().put("not_sure_stop", !ns)),
+                            x -> drawAgentRows(key)));
+        });
+    }
+
+    // ------------------------------------------------------------------ small helpers
+
+    private static String cut(String s, int n) {
+        return s.length() > n ? s.substring(0, n) + "…" : s;
+    }
+
+    private static String word(String choice) {
+        for (int i = 0; i < CHOICES.length; i++) if (CHOICES[i].equals(choice)) return CHOICE_WORDS[i];
+        return choice;
+    }
+
+    private static int parseColor(String s, int fallback) {
+        try {
+            return android.graphics.Color.parseColor(s);
+        } catch (Exception e) {
+            return fallback;
         }
     }
 }
