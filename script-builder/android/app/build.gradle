@@ -1,0 +1,64 @@
+plugins {
+    id 'com.android.application'
+}
+
+def buildNumber = (System.getenv('GITHUB_RUN_NUMBER') ?: '1').toInteger()
+
+android {
+    namespace 'com.itsjustajack.scriptbuilder'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.itsjustajack.scriptbuilder'
+        minSdk 26
+        targetSdk 34
+        versionCode buildNumber
+        versionName "2.0.${buildNumber}"
+    }
+
+    // Signing: the key comes from the CI secrets SB_KEYSTORE_B64 / SB_KEY_PASSWORD
+    // (written to app/release.keystore by the workflow). Keeping one key means each
+    // new build installs over the last one and keeps your projects.
+    signingConfigs {
+        shared {
+            storeFile file(System.getenv('SB_KEYSTORE_PATH') ?: 'release.keystore')
+            storePassword System.getenv('SB_KEY_PASSWORD') ?: 'android'
+            keyAlias System.getenv('SB_KEY_ALIAS') ?: 'scriptbuilder'
+            keyPassword System.getenv('SB_KEY_PASSWORD') ?: 'android'
+        }
+    }
+
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.shared
+        }
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.shared
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    lint {
+        checkReleaseBuilds false
+        abortOnError false
+    }
+}
+
+// The app is the web builder: make sure it has been built before packaging.
+tasks.register('checkBuilderPage') {
+    doLast {
+        if (!file('src/main/assets/index.html').exists()) {
+            throw new GradleException('Run "npm ci && node build.js && cp dist/janitor-script-builder.html android/app/src/main/assets/index.html" in script-builder/ first.')
+        }
+    }
+}
+preBuild.dependsOn checkBuilderPage
+
+dependencies {
+    implementation 'androidx.webkit:webkit:1.12.1'
+}
