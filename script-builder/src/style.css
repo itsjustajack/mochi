@@ -374,3 +374,12 @@ body.dragging::after { content: "Drop to import"; position: fixed; inset: 12px; 
 @media (max-width: 600px) {
   .top .meter { display: none; }
 }
+
+/* My projects */
+.plist { display: flex; flex-direction: column; gap: 8px; }
+.pitem { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--r); background: var(--panel); }
+.pitem.on { border-color: var(--accent); background: var(--accent-soft); }
+.pitem .pt { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 220px; }
+.pitem .pt b { overflow-wrap: anywhere; }
+.pitem .row { margin: 0; flex-wrap: nowrap; }
+.btn.armed { border-color: var(--bad); color: var(--bad); }

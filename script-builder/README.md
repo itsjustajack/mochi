@@ -22,6 +22,15 @@ The app opens on **Quick start**:
 
 **Simple mode** (the default) shows only the features you switched on, the test chat and the guide. Tap **Simple** at the top to switch to **Full** mode with every tool. On a phone, the ☰ button opens the menu and the back button steps back.
 
+## What's new in version 2.1
+
+| Feature | What it does |
+| --- | --- |
+| **My projects** | Every project is kept and saved as you type. Switching the kind of bot on Quick start opens that kind's own project, so you can go back and forth without losing anything. Imports open as new projects. Open, duplicate or delete them from **My projects**. |
+| **Scripts read back in full** | Import a script this builder made (even without "Include project data", and even after a code formatter has reflowed it) and every feature comes back: time, memory, mood, states, meters, stats, cast, lorebook, pacing, dice, atmosphere, writing style and rules. |
+| **Converts other scripts** | Scripts made elsewhere are turned into features: keyword checks become lore, `mood = "..."` checks become states, message counts become story phases, hour checks and mixed checks become rules, chances become probabilities, `HP: 10` style regexes become stats, and always-added text becomes always-on lore. |
+| **Keeps your work** | The ES5 checker and tester keep the code you pasted, even after the app is closed. |
+
 ## What's new in version 2
 
 | Feature | What it does |

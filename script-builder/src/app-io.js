@@ -55,31 +55,72 @@
       return;
     }
     if (plan.kind === 'project') {
-      var np = plan.project, lore = np.modules.lorebook.entries.length, on = J.MODULE_IDS.filter(function (id) { return np.modules[id].enabled; }).length;
+      var np = plan.project, lore = np.modules.lorebook.entries.length, on = J.MODULE_IDS.filter(function (id) { return np.modules[id].enabled; });
       modal('Open project?', function (close) {
         return [h('p', null, [h('b', { text: plan.label }), name ? h('span', { class: 'muted', text: ' (' + name + ')' }) : null]),
-          h('div', { class: 'stats' }, [stat(np.meta.title || 'Untitled', 'title'), stat(on, 'modules on'), stat(lore, 'lore entries'), stat(np.modules.ensemble.cast.length, 'cast')]),
-          h('div', { class: 'banner warn', text: 'This replaces the project you have open now. Save or copy it first if you want to keep it.' }),
+          h('div', { class: 'stats' }, [stat(np.meta.title || 'Untitled', 'title'), stat(on.length, 'features on'), stat(lore, 'lore entries'), stat(np.modules.ensemble.cast.length, 'cast')]),
+          on.length ? h('p', { class: 'small', text: 'Features: ' + on.map(function (id) { return A.FRIENDLY && A.FRIENDLY[id] ? A.FRIENDLY[id][0] : id; }).join(', ') + '.' }) : null,
+          plan.fromScript ? h('p', { class: 'small muted', text: 'Every setting was read back from the script, so you can keep editing it here. Changes made by hand below the ENGINE line of the script are not kept.' }) : null,
+          h('div', { class: 'banner ok', text: 'It opens as a new project. "' + (P.meta.title || 'Untitled') + '" stays in My projects.' }),
           h('div', { class: 'row end' }, [
             h('button', { class: 'btn ghost', type: 'button', text: 'Cancel', onclick: close }),
-            h('button', { class: 'btn', type: 'button', text: 'Back up current, then open', onclick: function () { A.save(J.slug(P.meta.title || 'project') + '-backup.jsb.json', IO.projectJSON(P), { type: 'application/json' }); close(); A.setProject(np); A.toast('Opened ' + (np.meta.title || 'project')); } }),
-            h('button', { class: 'btn primary', type: 'button', text: 'Open project', onclick: function () { close(); A.setProject(np); A.toast('Opened ' + (np.meta.title || 'project')); } })
+            h('button', { class: 'btn primary', type: 'button', text: 'Open as a new project', onclick: function () { close(); A.newProject(np, { source: 'import' }); A.go('quick'); A.toast('Opened ' + (np.meta.title || 'project')); } })
           ])];
       });
       return;
     }
+    if (plan.kind === 'script' && plan.project) {
+      var cp = plan.project, f = plan.found || {}, M = cp.modules, bits = [];
+      function cnt(n, one, many) { if (n) bits.push(n + ' ' + (n === 1 ? one : many)); }
+      cnt(M.lorebook.entries.filter(function (e) { return !e.always; }).length, 'lore entry', 'lore entries');
+      cnt(M.lorebook.entries.filter(function (e) { return e.always; }).length, 'always-on text', 'always-on texts');
+      cnt(M.states.list.length, 'mood/state', 'moods/states');
+      cnt(M.rules.list.length, 'combined rule', 'combined rules');
+      cnt(M.pacing.phases.length, 'story phase', 'story phases');
+      if (M.stats.list.length) bits.push('stats (' + M.stats.list.map(function (x) { return x.name; }).join(', ') + ')');
+      if (f.memory) bits.push('name memory');
+      if (f.recap) bits.push('recaps');
+      if (f.time) bits.push('time of day');
+      if (f.mood) bits.push('mood reading');
+      var onIds = J.MODULE_IDS.filter(function (id) { return M[id].enabled; });
+      modal('Convert this script', function (close) {
+        var kids = [h('p', null, [h('b', { text: plan.label }), name ? h('span', { class: 'muted', text: ' (' + name + ')' }) : null]),
+          h('p', { class: 'small', text: 'This script was made somewhere else. The builder read its keyword checks, message counts, time checks and chances and turned them into: ' + bits.join(', ') + '.' }),
+          h('p', { class: 'small muted', text: 'Features: ' + onIds.map(function (id) { return A.FRIENDLY && A.FRIENDLY[id] ? A.FRIENDLY[id][0] : id; }).join(', ') + '. Check them over: anything the builder could not read' + (f.skipped ? ' (' + f.skipped + ' piece' + (f.skipped === 1 ? '' : 's') + ')' : '') + ' was left out.' })];
+        if (plan.entries.length) kids.push(lorePreview(plan.entries));
+        kids.push(h('div', { class: 'banner ok', text: 'It opens as a new project. "' + (P.meta.title || 'Untitled') + '" stays in My projects.' }));
+        kids.push(h('div', { class: 'row end' }, [
+          h('button', { class: 'btn ghost', type: 'button', text: 'Cancel', onclick: close }),
+          h('button', { class: 'btn', type: 'button', text: 'Open in ES5 checker', onclick: function () { close(); A.checkState.code = plan.code; A.checkState.result = null; A.checkState.fixed = null; A.saveNow(); A.go('check'); } }),
+          plan.entries.length ? h('button', { class: 'btn', type: 'button', text: 'Only add its lore here', onclick: function () { close(); A.P = IO.mergeLore(A.P, plan.entries, 'append'); A.compileNow(); done('Added ' + plan.entries.length + ' entries', 'mod-lorebook'); } }) : null,
+          h('button', { class: 'btn primary', type: 'button', text: 'Open as a new project', onclick: function () { close(); A.newProject(cp, { source: 'import' }); A.go('quick'); A.toast('Converted ' + (cp.meta.title || 'script')); } })
+        ]));
+        return kids;
+      });
+      return;
+    }
     if (plan.kind === 'card') {
-      var c = plan.card, o = { fields: true, lore: plan.entries.length > 0, mode: 'append' };
+      var c = plan.card, o = { fields: true, lore: plan.entries.length > 0, mode: 'append', where: 'new' };
       modal('Import character card', function (close) {
         return [h('p', null, [h('b', { text: plan.label })]),
           c.description ? h('div', { class: 'out', style: { maxHeight: '110px' }, text: c.description.slice(0, 600) + (c.description.length > 600 ? '\u2026' : '') }) : null,
           check('ioFields', 'Use the name, personality and scenario', true, function (v) { o.fields = v; }, 'Fills Card blocks and the project name. The description and first message go into Notes.'),
           plan.entries.length ? check('ioLore', 'Import the card\u2019s lorebook (' + plan.entries.length + (plan.entries.length === 1 ? ' entry)' : ' entries)'), true, function (v) { o.lore = v; }, 'On Janitor a lorebook is a script, so this is how a card\u2019s lore actually reaches the bot.') : h('p', { class: 'muted small', text: 'This card has no lorebook.' }),
           plan.entries.length ? lorePreview(plan.entries) : null,
-          plan.entries.length ? radio('ioMode', [['append', 'Add to my lorebook'], ['replace', 'Replace my lorebook']], 'append', function (v) { o.mode = v; }) : null,
+          radio('ioWhere', [['new', 'Make it a new project', 'The project you have open stays in My projects.'], ['here', 'Add it to this project']], 'new', function (v) { o.where = v; }),
+          plan.entries.length ? radio('ioMode', [['append', 'Add to the lorebook'], ['replace', 'Replace the lorebook']], 'append', function (v) { o.mode = v; }) : null,
           h('div', { class: 'row end' }, [h('button', { class: 'btn ghost', type: 'button', text: 'Cancel', onclick: close }),
             h('button', { class: 'btn primary', type: 'button', text: 'Import', onclick: function () {
               close();
+              if (o.where !== 'here') {
+                var base = J.defaultProject();
+                ['memory', 'emotions', 'style'].forEach(function (id) { base.modules[id].enabled = true; });
+                base.meta.title = c.name || 'Imported card';
+                A.newProject(IO.applyCard(base, c, { fields: true, lore: o.lore, replaceLore: false }), { source: 'card' });
+                A.go(o.lore && plan.entries.length ? 'mod-lorebook' : 'quick');
+                A.toast('Opened ' + (c.name || 'card') + ' as a new project');
+                return;
+              }
               var np2 = IO.applyCard(A.P, c, { fields: o.fields, lore: o.lore, replaceLore: o.mode === 'replace' });
               A.P = np2; A.compileNow();
               done('Imported ' + (c.name || 'card') + (o.lore && plan.entries.length ? ' with ' + plan.entries.length + (plan.entries.length === 1 ? ' lore entry' : ' lore entries') : ''), o.lore && plan.entries.length ? 'mod-lorebook' : 'card');
@@ -97,7 +138,7 @@
         if (entries.length) {
           kids.push(h('p', { class: 'small', text: entries.length + ' entr' + (entries.length === 1 ? 'y' : 'ies') + ' found. Your lorebook has ' + P.modules.lorebook.entries.length + '.' }));
           kids.push(lorePreview(entries));
-          kids.push(radio('ioMode2', [['append', 'Add to my lorebook', 'Duplicate IDs get a number added.'], ['replace', 'Replace my lorebook']], 'append', function (v) { mode = v; }));
+          kids.push(radio('ioMode2', [['append', 'Add to this project\u2019s lorebook', 'Duplicate IDs get a number added.'], ['new', 'Make it a new project', 'The project you have open stays in My projects.'], ['replace', 'Replace this project\u2019s lorebook']], 'append', function (v) { mode = v; }));
         }
         var btns = [h('button', { class: 'btn ghost', type: 'button', text: 'Cancel', onclick: close })];
         if (plan.kind === 'script') {
@@ -106,6 +147,11 @@
         }
         if (entries.length) btns.push(h('button', { class: 'btn primary', type: 'button', text: 'Import ' + entries.length + ' entr' + (entries.length === 1 ? 'y' : 'ies'), onclick: function () {
           close();
+          if (mode === 'new') {
+            var base = J.defaultProject(); base.meta.title = (name || 'Imported lorebook').replace(/\.[a-z0-9]+$/i, '');
+            A.newProject(IO.mergeLore(base, entries, 'append'), { source: 'lorebook' }); A.go('mod-lorebook'); A.toast('Opened ' + entries.length + ' entries as a new project');
+            return;
+          }
           A.P = IO.mergeLore(A.P, entries, mode); A.compileNow();
           done((mode === 'replace' ? 'Replaced the lorebook with ' : 'Added ') + entries.length + ' entries', 'mod-lorebook');
         } }));

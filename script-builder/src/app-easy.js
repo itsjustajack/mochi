@@ -61,26 +61,13 @@
       if (!pr) return;
       var cur = A.ui.loadedPreset === k.preset;
       var b = h('button', { class: 'kind' + (cur ? ' on' : ''), type: 'button', 'aria-pressed': cur ? 'true' : 'false' }, [h('span', { class: 'ki', 'aria-hidden': 'true', text: k.icon }), h('b', { text: k.name }), h('span', { class: 'kb', text: k.blurb })]);
-      var t;
       b.addEventListener('click', function () {
-        if (A.ui.dirty && !b.classList.contains('armed')) {
-          [].forEach.call(kinds.querySelectorAll('.armed'), function (x) { x.classList.remove('armed'); x.lastChild.textContent = x.getAttribute('data-blurb'); });
-          b.setAttribute('data-blurb', k.blurb); b.classList.add('armed'); b.lastChild.textContent = 'Tap again to replace what you have.';
-          clearTimeout(t); t = setTimeout(function () { b.classList.remove('armed'); b.lastChild.textContent = k.blurb; }, 4000);
-          return;
-        }
-        var keepName = P.meta.character, keepTz = S.utcOffset;
-        var np = pr.make();
-        if (keepName && !np.meta.character) np.meta.character = keepName;
-        np.settings.utcOffset = keepTz;
-        A.ui.loadedPreset = k.preset;
-        A.setProject(np);
-        A.ui.dirty = false;
-        A.toast('Started from ' + k.name);
+        var how = A.openKind(k.preset, { character: P.meta.character, utcOffset: S.utcOffset });
+        A.toast(how === 'reopened' ? 'Back to your ' + k.name + ' project' : 'Started a ' + k.name + ' project. Your other projects are kept.');
       });
       kinds.appendChild(b);
     });
-    view.appendChild(step(1, 'What kind of bot is it?', kinds, 'Each one is a working example you can change. Your choice fills in step 3 for you.'));
+    view.appendChild(step(1, 'What kind of bot is it?', [kinds, h('p', { class: 'small muted' }, ['Switching never deletes anything: each kind keeps its own project, and imports open as new ones. ', h('a', { href: '#projects', text: 'My projects (' + A.library().length + ')', onclick: function (e) { e.preventDefault(); A.go('projects'); } })])], 'Each one is a working example you can change. Your choice fills in step 3 for you.'));
 
     /* 2. names and time zone */
     var tzOpts = ZONES.map(function (z) { return [String(z[0]), z[1]]; });
@@ -175,6 +162,49 @@
       } }), h('button', { class: 'btn ghost', type: 'button', text: 'Edit the full list', onclick: function () { A.go('mod-style'); } })])
     ]));
     setTimeout(run, 0);
+    return view;
+  };
+
+
+  /* ================= MY PROJECTS ================= */
+  function ago(t) {
+    var d = (Date.now() - (t || 0)) / 1000;
+    if (d < 90) return 'just now';
+    if (d < 3600) return Math.round(d / 60) + ' min ago';
+    if (d < 86400) return Math.round(d / 3600) + ' h ago';
+    return Math.round(d / 86400) + ' days ago';
+  }
+  A.views.projects = function () {
+    A.saveNow();
+    var view = h('div', { class: 'view projects' });
+    view.appendChild(h('div', { class: 'head' }, h('div', { class: 't' }, [
+      h('h1', { text: 'My projects' }),
+      h('p', { class: 'lede', text: 'Everything you make or import is kept here and saved as you type. Open one to keep working on it; nothing is deleted unless you delete it.' })
+    ])));
+    var list = h('div', { class: 'plist' });
+    var kindName = {};
+    KINDS.forEach(function (k) { kindName[k.preset] = k.name; });
+    A.library().forEach(function (it) {
+      var cur = it.id === A.libId;
+      var meta = [it.character ? it.character : null, kindName[it.preset] || (it.source === 'import' ? 'Imported' : it.source === 'card' ? 'From a card' : it.source === 'copy' ? 'Copy' : null), (it.modules || 0) + ' features', it.lore ? it.lore + ' lore' : null, 'saved ' + ago(it.updated)].filter(Boolean).join(' · ');
+      var del = h('button', { class: 'btn sm ghost', type: 'button', text: 'Delete' });
+      var t;
+      del.addEventListener('click', function () {
+        if (!del.classList.contains('armed')) { del.classList.add('armed'); del.textContent = 'Tap again to delete'; clearTimeout(t); t = setTimeout(function () { del.classList.remove('armed'); del.textContent = 'Delete'; }, 4000); return; }
+        A.deleteProject(it.id); A.toast('Deleted ' + (it.title || 'project')); A.rerender();
+      });
+      list.appendChild(h('div', { class: 'pitem' + (cur ? ' on' : '') }, [
+        h('div', { class: 'pt' }, [h('b', { text: it.title || 'Untitled' }), h('span', { class: 'small muted', text: meta })]),
+        h('div', { class: 'row' }, cur ? [h('span', { class: 'tag ok', text: 'Open now' }), h('button', { class: 'btn sm', type: 'button', text: 'Duplicate', onclick: function () { A.duplicateProject(); A.toast('Made a copy. You are now editing the copy.'); } })]
+          : [h('button', { class: 'btn sm primary', type: 'button', text: 'Open', onclick: function () { if (A.openProject(it.id)) { A.go('quick'); A.toast('Opened ' + (it.title || 'project')); } } }), del])
+      ]));
+    });
+    view.appendChild(panel('Saved on this device', list));
+    view.appendChild(panel('New', h('div', { class: 'row' }, [
+      h('button', { class: 'btn', type: 'button', text: 'New empty project', onclick: function () { var np = J.defaultProject(); np.meta.title = 'New project'; A.newProject(np, { source: 'new' }); A.go('quick'); A.toast('New empty project. Switch on features in step 3.'); } }),
+      h('button', { class: 'btn', type: 'button', text: 'Import a file or script', onclick: function () { A.pickFile(A.ACCEPT, A.openImport); } }),
+      h('button', { class: 'btn ghost', type: 'button', text: 'Save this project to a file', onclick: function () { A.save(J.slug(A.P.meta.title || 'project') + '.jsb.json', window.JSBIO.projectJSON(A.P), { type: 'application/json' }); } })
+    ]), 'Projects live in this app’s storage. Save a file now and then as a backup, especially before uninstalling.'));
     return view;
   };
 

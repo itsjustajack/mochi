@@ -86,7 +86,7 @@ jobs:
           target_commitish: ${{ github.sha }}
           make_latest: false
           body: |
-            Newest Script Builder build (version 2.0.${{ github.run_number }}, from branch ${{ github.ref_name }}).
+            Newest Script Builder build (version 2.1.${{ github.run_number }}, from branch ${{ github.ref_name }}).
 
             **On your Android phone:** tap **ScriptBuilder.apk** below, open it, and allow installing from your browser if asked.
             Signing key: ${{ env.SIGNING }}. With a permanent key, a newer build installs over the old one and keeps your projects. With a temporary key, export your project first (Project menu), then uninstall the old app before installing.

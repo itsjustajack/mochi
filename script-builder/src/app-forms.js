@@ -34,20 +34,12 @@
     var pres = h('div', { class: 'presets' });
     A.PRESETS.forEach(function (pr) {
       var b = h('button', { class: 'preset', type: 'button' }, [h('b', { text: pr.title }), h('span', { text: pr.blurb })]);
-      var t;
       b.addEventListener('click', function () {
-        if (!b.classList.contains('armed')) {
-          [].forEach.call(pres.querySelectorAll('.armed'), function (x) { x.classList.remove('armed'); x.lastChild.textContent = x.getAttribute('data-blurb'); });
-          b.setAttribute('data-blurb', pr.blurb);
-          b.classList.add('armed'); b.lastChild.textContent = 'Click again to replace your current project.';
-          clearTimeout(t); t = setTimeout(function () { b.classList.remove('armed'); b.lastChild.textContent = pr.blurb; }, 4000);
-          return;
-        }
-        A.setProject(pr.make()); A.toast('Loaded ' + pr.title);
+        A.newProject(pr.make(), { preset: pr.id, source: 'preset' }); A.toast('Opened ' + pr.title + ' as a new project. Your old one is in My projects.');
       });
       pres.appendChild(b);
     });
-    view.appendChild(panel('Presets', pres, 'Each one is a complete, working project. Loading one replaces what you have (export first if you want to keep it).'));
+    view.appendChild(panel('Presets', pres, 'Each one is a complete, working project. It opens as a new project; the one you have now stays in My projects.'));
 
     /* modules */
     var mods = h('div', { class: 'mods' });
@@ -266,6 +258,7 @@
         fill();
         return [grid([fSelect('Toward', r, 'to', targets, { structural: true }),
           fSelect('Type', r, 'type', Object.keys(J.REL_PRESETS).map(function (k) { return [k, cap(k)]; }), { hint: (J.REL_PRESETS[r.type] || {}).tip, onChange: function (v) { var p = J.REL_PRESETS[v]; if (p && v !== 'custom') { ['trust', 'affinity', 'respect', 'rivalry', 'influence'].forEach(function (k) { r[k] = p[k]; }); } }, structural: true })]),
+          r.raw ? fText('Imported wording (used instead of the sliders; clear it to use them)', r, 'raw', { structural: false }) : null,
           sliders, fText('Note', r, 'note', { ph: 'e.g. Owes her money.' })];
       }
     })]));
