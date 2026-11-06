@@ -70,7 +70,7 @@ ok(d.kind === 'card' && d.card.name === 'Old Bot', 'V1 card');
 var applied = IO.applyCard(J.defaultProject(), d.card, {});
 ok(applied.card.name === 'Old Bot' && applied.card.psych === 'grumpy' && /desc/.test(applied.meta.notes), 'applyCard fields');
 /* Lore from an old hand-written script */
-var old = fs.readFileSync('/mnt/project-files/janitor-script/janitor-all-in-one-script.js', 'utf8');
+var old = fs.readFileSync(require('path').join(__dirname, 'fixtures/old-hand-written-script.js'), 'utf8');
 d = IO.detect({ text: old, name: 'old.js' });
 ok(d.kind === 'script' && d.entries.length >= 3 && d.entries.some(function (e) { return /Rusty Lantern/.test(e.text); }), 'lore from old script: ' + (d.entries && d.entries.length));
 d = IO.detect({ text: 'const lore = [{ keywords: ["moon", "night sky"], personality: "{{char}} loves the moon.", scenario: "The moon is full.", minMessages: 5, probability: 0.5 }];\ncontext.character.scenario += "";' });
