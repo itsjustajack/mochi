@@ -1,0 +1,97 @@
+name: Build Script Builder APK
+
+on:
+  push:
+    paths:
+      - 'script-builder/**'
+      - '.github/workflows/script-builder.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Test and build the offline page
+        working-directory: script-builder
+        run: |
+          npm ci
+          node tests/run.js
+          node tests/io.js
+          node build.js
+          mkdir -p android/app/src/main/assets
+          cp dist/janitor-script-builder.html android/app/src/main/assets/index.html
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      # The signing key lives in the repository secrets, never in the code.
+      # Without them, a throwaway key is made: that APK installs fine, but the
+      # next build cannot update it in place (uninstall first, after exporting).
+      - name: Prepare the signing key
+        working-directory: script-builder/android/app
+        env:
+          SB_KEYSTORE_B64: ${{ secrets.SB_KEYSTORE_B64 }}
+          SB_KEY_PASSWORD: ${{ secrets.SB_KEY_PASSWORD }}
+        run: |
+          if [ -n "$SB_KEYSTORE_B64" ] && [ -n "$SB_KEY_PASSWORD" ]; then
+            echo "$SB_KEYSTORE_B64" | base64 -d > release.keystore
+            echo "SB_KEY_PASSWORD=$SB_KEY_PASSWORD" >> "$GITHUB_ENV"
+            echo "SIGNING=permanent" >> "$GITHUB_ENV"
+          else
+            PW=$(openssl rand -hex 16)
+            echo "::add-mask::$PW"
+            keytool -genkeypair -keystore release.keystore -storepass "$PW" -keypass "$PW" -alias scriptbuilder \
+              -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Script Builder" >/dev/null
+            echo "SB_KEY_PASSWORD=$PW" >> "$GITHUB_ENV"
+            echo "SIGNING=temporary" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build the APK
+        working-directory: script-builder/android
+        run: gradle assembleRelease --no-daemon --stacktrace
+
+      - name: Name the files
+        run: |
+          cp script-builder/android/app/build/outputs/apk/release/app-release.apk ScriptBuilder.apk
+          cp script-builder/dist/janitor-script-builder.html janitor-script-builder.html
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ScriptBuilder
+          path: |
+            ScriptBuilder.apk
+            janitor-script-builder.html
+
+      # A release page is the easiest place to download from on a phone.
+      - name: Publish to the "Script Builder" release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: script-builder-latest
+          name: Script Builder for Janitor AI (latest build)
+          target_commitish: ${{ github.sha }}
+          make_latest: false
+          body: |
+            Newest Script Builder build (version 2.0.${{ github.run_number }}, from branch ${{ github.ref_name }}).
+
+            **On your Android phone:** tap **ScriptBuilder.apk** below, open it, and allow installing from your browser if asked.
+            Signing key: ${{ env.SIGNING }}. With a permanent key, a newer build installs over the old one and keeps your projects. With a temporary key, export your project first (Project menu), then uninstall the old app before installing.
+
+            **On a computer:** download **janitor-script-builder.html** and open it in any browser. It works offline.
+          files: |
+            ScriptBuilder.apk
+            janitor-script-builder.html

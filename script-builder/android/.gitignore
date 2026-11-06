@@ -1,0 +1,9 @@
+build/
+.gradle/
+local.properties
+*.iml
+.idea/
+# Built from ../src by `node build.js` before every APK build.
+app/src/main/assets/index.html
+*.keystore
+*.jks

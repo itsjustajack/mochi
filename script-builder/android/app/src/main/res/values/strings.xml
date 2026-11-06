@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Script Builder</string>
+    <string name="no_browser">No browser app found to open the link.</string>
+    <string name="saved">Saved %1$s</string>
+    <string name="save_failed">Could not save the file.</string>
+    <string name="share_title">Send to</string>
+</resources>

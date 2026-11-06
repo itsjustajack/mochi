@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- a page -->
+    <path android:fillColor="#FFFFFF"
+        android:pathData="M36,30L64,30L74,40L74,78L36,78Z" />
+    <path android:fillColor="#D5EDE9"
+        android:pathData="M64,30L74,40L64,40Z" />
+    <!-- code brackets -->
+    <path android:strokeColor="#0B6C67" android:strokeWidth="4.5"
+        android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:pathData="M49,49L43,55.5L49,62M61,49L67,55.5L61,62" />
+    <!-- a spark: "build" -->
+    <path android:fillColor="#F2A93B"
+        android:pathData="M74,22L76.5,28.5L83,31L76.5,33.5L74,40L71.5,33.5L65,31L71.5,28.5Z" />
+</vector>
