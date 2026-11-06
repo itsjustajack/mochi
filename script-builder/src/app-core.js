@@ -528,12 +528,20 @@ var App = (function () {
       h('button', { type: 'button', text: 'Copy project code', onclick: function () { close(); copy(IO.projectCode(A.P), 'Project code'); } }),
       h('button', { type: 'button', text: 'Save script (.js)', onclick: function () { close(); if (A.compiled) save(slug + '.js', A.scriptCode(), { type: 'text/javascript' }); } }),
       h('hr'),
-      h('button', { type: 'button', text: 'Start a blank project', onclick: function () { close(); go('start'); toast('Pick "Blank project" under Presets'); } })
+      h('button', { type: 'button', text: 'Start a new project', onclick: function () { close(); go('quick'); toast('Pick a kind of bot, or "Start empty"'); } }),
+      h('hr'),
+      h('button', { type: 'button', text: 'Theme: ' + (A.theme === 'light' ? 'light' : A.theme === 'dark' ? 'dark' : 'match phone') + ' (tap to change)', onclick: function () { close(); cycleTheme(); toast('Theme: ' + (A.theme === 'auto' ? 'match phone' : A.theme)); } })
     ]);
     function close() { if (pop.parentNode) pop.parentNode.removeChild(pop); document.removeEventListener('click', outside, true); document.removeEventListener('keydown', esc); }
     function outside(e) { if (!pop.contains(e.target) && e.target !== btn) close(); }
     function esc(e) { if (e.key === 'Escape') close(); }
     btn.parentNode.appendChild(pop);
+    /* Keep the whole menu on screen: on a phone the button sits near the left edge. */
+    var vw = document.documentElement.clientWidth || window.innerWidth;
+    pop.style.maxWidth = (vw - 16) + 'px';
+    var r = pop.getBoundingClientRect();
+    if (r.left < 8) pop.style.right = (r.left - 8) + 'px';
+    else if (r.right > vw - 8) pop.style.right = (r.right - (vw - 8)) + 'px';
     setTimeout(function () { document.addEventListener('click', outside, true); document.addEventListener('keydown', esc); }, 0);
   }
   /* The script as it should be copied or saved (with re-import data if asked). */

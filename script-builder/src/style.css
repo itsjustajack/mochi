@@ -368,6 +368,8 @@ body.dragging::after { content: "Drop to import"; position: fixed; inset: 12px; 
   .kinds { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .feats { grid-template-columns: minmax(0, 1fr); }
   input, select, textarea { font-size: 16px; }
+  .menu .pop { min-width: 270px; }
+  .menu .pop button { padding: 12px 12px; font-size: var(--t-md); }
 }
 @media (max-width: 600px) {
   .top .meter { display: none; }
