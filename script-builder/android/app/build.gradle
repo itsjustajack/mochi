@@ -13,7 +13,7 @@ android {
         minSdk 26
         targetSdk 34
         versionCode buildNumber
-        versionName "2.0.${buildNumber}"
+        versionName "2.1.${buildNumber}"
     }
 
     // Signing: the key comes from the CI secrets SB_KEYSTORE_B64 / SB_KEY_PASSWORD

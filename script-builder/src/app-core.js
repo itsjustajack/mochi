@@ -3,7 +3,7 @@
 var App = (function () {
   'use strict';
   var JSB = window.JSB, PRESETS = window.JSB_PRESETS || [];
-  var KEY = 'jsb.project.v1', THEME_KEY = 'jsb.theme', UI_KEY = 'jsb.ui';
+  var KEY = 'jsb.project.v1', THEME_KEY = 'jsb.theme', UI_KEY = 'jsb.ui', LIB_KEY = 'jsb.library.v1', LIB_ITEM = 'jsb.p.';
 
   var A = {
     JSB: JSB, PRESETS: PRESETS,
@@ -33,10 +33,89 @@ var App = (function () {
     }
     A.P = JSB.normalize(p);
     var u = lsGet(UI_KEY);
-    if (u) { try { var o = JSON.parse(u); if (o && typeof o === 'object') { A.ui.outTab = o.outTab || 0; if (o.preset) A.ui.loadedPreset = o.preset; } } catch (e) {} }
+    if (u) { try { var o = JSON.parse(u); if (o && typeof o === 'object') { A.ui.outTab = o.outTab || 0; if (o.preset) A.ui.loadedPreset = o.preset; if (o.lib) A.libId = o.lib; if (o.check && A.checkState) A.checkState.code = o.check; if (o.testCode) A.test.custom = o.testCode; } } catch (e) {} }
+    var L = library();
+    if (!A.libId || !L.items.some(function (x) { return x.id === A.libId; })) A.libId = newLibId();
   }
-  var saveTimer = null, compileTimer = null;
-  function saveNow() { lsSet(KEY, JSON.stringify(A.P)); lsSet(UI_KEY, JSON.stringify({ outTab: A.ui.outTab, preset: A.ui.loadedPreset || '' })); }
+  var saveTimer = null, compileTimer = null, warnedFull = false;
+  function saveNow() {
+    var json = JSON.stringify(A.P), ok = lsSet(KEY, json);
+    if (A.libId) ok = lsSet(LIB_ITEM + A.libId, json) && ok;
+    touchLibrary();
+    lsSet(UI_KEY, JSON.stringify({ outTab: A.ui.outTab, preset: A.ui.loadedPreset || '', lib: A.libId, check: A.checkState && (A.checkState.code || '').length < 400000 ? A.checkState.code || '' : '', testCode: (A.test.custom || '').length < 400000 ? A.test.custom || '' : '' }));
+    if (!ok && !warnedFull) { warnedFull = true; toast('Phone storage for the app is full. Delete old projects in My projects so your work keeps saving.'); }
+  }
+  A.saveNow = saveNow;
+
+  /* ---------- project library: every project is kept until you delete it ---------- */
+  function newLibId() { return 'p' + Date.now().toString(36) + Math.floor(Math.random() * 1296).toString(36); }
+  function library() {
+    var raw = lsGet(LIB_KEY), L = null;
+    if (raw) { try { L = JSON.parse(raw); } catch (e) { L = null; } }
+    if (!L || !Array.isArray(L.items)) L = { items: [] };
+    return L;
+  }
+  function touchLibrary() {
+    if (!A.libId || !A.P) return;
+    var L = library(), it = L.items.filter(function (x) { return x.id === A.libId; })[0];
+    if (!it) { it = { id: A.libId, created: Date.now() }; L.items.unshift(it); }
+    it.title = A.P.meta.title || 'Untitled';
+    it.character = A.P.meta.character || '';
+    it.preset = it.preset || A.ui.loadedPreset || '';
+    it.modules = JSB.MODULE_IDS.filter(function (id) { return A.P.modules[id].enabled; }).length;
+    it.lore = (A.P.modules.lorebook.entries || []).length;
+    it.updated = Date.now();
+    lsSet(LIB_KEY, JSON.stringify(L));
+  }
+  A.library = function () { return library().items.slice().sort(function (a, b) { return (b.updated || 0) - (a.updated || 0); }); };
+  /* Open p as a new project; the one you had stays in My projects. */
+  A.newProject = function (p, opts) {
+    saveNow();
+    A.libId = newLibId();
+    A.ui.loadedPreset = opts && opts.preset || '';
+    var L = library();
+    L.items.unshift({ id: A.libId, created: Date.now(), preset: A.ui.loadedPreset, source: opts && opts.source || '' });
+    lsSet(LIB_KEY, JSON.stringify(L));
+    A.ui.dirty = false;
+    setProject(p);
+  };
+  A.openProject = function (id) {
+    if (id === A.libId) return true;
+    var raw = lsGet(LIB_ITEM + id), p = null;
+    if (raw) { try { p = JSON.parse(raw); } catch (e) { p = null; } }
+    if (!p) { toast('That project could not be read.'); return false; }
+    saveNow();
+    var it = library().items.filter(function (x) { return x.id === id; })[0];
+    A.libId = id; A.ui.loadedPreset = it && it.preset || '';
+    A.ui.dirty = false;
+    setProject(p);
+    return true;
+  };
+  A.deleteProject = function (id) {
+    if (id === A.libId) return false;
+    var L = library();
+    L.items = L.items.filter(function (x) { return x.id !== id; });
+    lsSet(LIB_KEY, JSON.stringify(L));
+    try { window.localStorage.removeItem(LIB_ITEM + id); } catch (e) {}
+    warnedFull = false;
+    return true;
+  };
+  A.duplicateProject = function () {
+    var p = JSON.parse(JSON.stringify(A.P));
+    p.meta.title = (p.meta.title || 'Untitled') + ' (copy)';
+    A.newProject(p, { preset: A.ui.loadedPreset, source: 'copy' });
+  };
+  /* The kinds of bot on Quick start: each keeps its own project, so you can switch back and forth. */
+  A.openKind = function (presetId, keep) {
+    var mine = A.library().filter(function (x) { return x.preset === presetId; })[0];
+    if (mine && (A.libId === mine.id || A.openProject(mine.id))) return 'reopened';
+    var pr = PRESETS.filter(function (x) { return x.id === presetId; })[0];
+    if (!pr) return '';
+    var np = pr.make();
+    if (keep) { if (keep.character && !np.meta.character) np.meta.character = keep.character; if (keep.utcOffset !== undefined) np.settings.utcOffset = keep.utcOffset; }
+    A.newProject(np, { preset: presetId, source: 'kind' });
+    return 'new';
+  };
 
   /* ---------- compile ---------- */
   function compileNow() {
@@ -66,6 +145,8 @@ var App = (function () {
   function setProject(p) {
     A.P = JSB.normalize(p);
     A.ui.closed = {};
+    var title = document.getElementById('projTitle');
+    if (title) title.value = A.P.meta.title || '';
     saveNow(); compileNow(); renderShell(); go(A.view);
   }
   A.setProject = setProject;
@@ -440,7 +521,7 @@ var App = (function () {
   ];
   function navList() {
     if (A.simple) {
-      var s = [{ h: 'Make' }, { id: 'quick', ico: '\u2605', name: 'Quick start' }];
+      var s = [{ h: 'Make' }, { id: 'quick', ico: '\u2605', name: 'Quick start' }, { id: 'projects', ico: '\u2630', name: 'My projects' }];
       A.JSB.MODULES.forEach(function (m) { if (A.P.modules[m.id].enabled) s.push({ id: 'mod-' + m.id, ico: m.icon, name: (A.FRIENDLY && A.FRIENDLY[m.id] ? A.FRIENDLY[m.id][0] : m.name), mod: m.id }); });
       s.push({ h: 'Test & share' });
       s.push({ id: 'chat', ico: '\u2709', name: 'Test chat' });
@@ -451,7 +532,7 @@ var App = (function () {
       s.push({ id: 'guide', ico: '?', name: 'Guide' });
       return s;
     }
-    var list = [{ h: 'Build' }, { id: 'quick', ico: '\u2605', name: 'Quick start' }].concat(NAV.slice(1));
+    var list = [{ h: 'Build' }, { id: 'quick', ico: '\u2605', name: 'Quick start' }, { id: 'projects', ico: '\u2630', name: 'My projects' }].concat(NAV.slice(1));
     A.JSB.MODULES.forEach(function (m) { list.push({ id: 'mod-' + m.id, ico: m.icon, name: m.name, mod: m.id }); });
     list.push({ h: 'Check & test' });
     list.push({ id: 'output', ico: '\u2398', name: 'Script output' });
@@ -528,7 +609,9 @@ var App = (function () {
       h('button', { type: 'button', text: 'Copy project code', onclick: function () { close(); copy(IO.projectCode(A.P), 'Project code'); } }),
       h('button', { type: 'button', text: 'Save script (.js)', onclick: function () { close(); if (A.compiled) save(slug + '.js', A.scriptCode(), { type: 'text/javascript' }); } }),
       h('hr'),
-      h('button', { type: 'button', text: 'Start a new project', onclick: function () { close(); go('quick'); toast('Pick a kind of bot, or "Start empty"'); } }),
+      h('button', { type: 'button', text: 'My projects\u2026', onclick: function () { close(); go('projects'); } }),
+      h('button', { type: 'button', text: 'Start a new project', onclick: function () { close(); go('projects'); toast('Your current project is kept'); } }),
+      h('button', { type: 'button', text: 'Duplicate this project', onclick: function () { close(); A.duplicateProject(); toast('Made a copy. You are now editing the copy.'); } }),
       h('hr'),
       h('button', { type: 'button', text: 'Theme: ' + (A.theme === 'light' ? 'light' : A.theme === 'dark' ? 'dark' : 'match phone') + ' (tap to change)', onclick: function () { close(); cycleTheme(); toast('Theme: ' + (A.theme === 'auto' ? 'match phone' : A.theme)); } })
     ]);

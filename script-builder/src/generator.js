@@ -13,7 +13,7 @@
 })(typeof self !== 'undefined' ? self : this, function (RUNTIME_SOURCE) {
   'use strict';
 
-  var VERSION = '2.0.0';
+  var VERSION = '2.1.0';
 
   /* ---------- runtime sections ---------- */
   var RUNTIME = {};
@@ -304,6 +304,7 @@
     return bits.join(', ');
   }
   function relationText(r) {
+    if (trim(r.raw)) return trim(r.raw);
     var bits = [], t = num(r.trust, 0.5), a = num(r.affinity, 0.5), re = num(r.respect, 0.5), ri = num(r.rivalry, 0), inf = num(r.influence, 0);
     if (t >= 0.7) bits.push('trusts them'); else if (t <= 0.25) bits.push('does not trust them');
     if (a >= 0.85) bits.push('deeply fond of them'); else if (a >= 0.65) bits.push('fond of them'); else if (a <= 0.25) bits.push('cold toward them');

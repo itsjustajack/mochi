@@ -75,6 +75,45 @@ d = IO.detect({ text: old, name: 'old.js' });
 ok(d.kind === 'script' && d.entries.length >= 3 && d.entries.some(function (e) { return /Rusty Lantern/.test(e.text); }), 'lore from old script: ' + (d.entries && d.entries.length));
 d = IO.detect({ text: 'const lore = [{ keywords: ["moon", "night sky"], personality: "{{char}} loves the moon.", scenario: "The moon is full.", minMessages: 5, probability: 0.5 }];\ncontext.character.scenario += "";' });
 ok(d.kind === 'script' && d.entries.length === 2 && d.entries[0].minMsg === 5 && d.entries[0].prob === 50 && d.entries[0].target === 'personality', 'lore from modern script: ' + JSON.stringify(d.entries));
+/* scripts made with this builder come back as whole projects (no embed needed) */
+PRESETS.forEach(function (pr) {
+  [{}, { engine: 'readable' }, { split: true }].forEach(function (variant) {
+    var p = pr.make(); Object.assign(p.settings, variant);
+    var c1 = J.compile(p);
+    if (!c1.modules.length) return;
+    var d2 = IO.detect({ text: c1.code, name: 'made.js' });
+    ok(d2.kind === 'project' && d2.fromScript, pr.id + ' ' + JSON.stringify(variant) + ': builder script detected as a project');
+    if (d2.kind !== 'project') return;
+    if (variant.split) d2.project.meta.title = p.meta.title;
+    ok(J.compile(d2.project).code === c1.code, pr.id + ' ' + JSON.stringify(variant) + ': builder script -> project -> same script');
+    ok(d2.project.modules.lorebook.entries.length === J.normalize(p).modules.lorebook.entries.filter(function (e) { return e.enabled !== false && e.text.trim(); }).length, pr.id + ': lore entries are not invented from states or rules');
+  });
+});
+/* reformatted builder script (as a code formatter would leave it) */
+var tav = J.compile(PRESETS.filter(function (x) { return x.id === 'tavern'; })[0].make()).code;
+var reform = tav.replace(/\n  /g, '\n      ').replace(/\[\{ /g, '[\n{\n');
+d = IO.detect({ text: reform, name: 'reformatted.js' });
+ok(d.kind === 'project' && J.compile(d.project).code === tav, 'reformatted builder script still reads back');
+/* scripts made elsewhere are converted, not just mined for lore */
+var ifs = fs.readFileSync(path.join(__dirname, 'fixtures/if-style-script.js'), 'utf8');
+d = IO.detect({ text: ifs, name: 'luna.js' });
+var CM = d.project && d.project.modules;
+ok(d.kind === 'script' && CM, 'if-style script converts to a project');
+if (CM) {
+  ok(CM.lorebook.entries.some(function (e) { return e.keys === 'forest, woods' && /old forest/.test(e.text); }), 'OR keyword checks become one lore entry');
+  ok(CM.lorebook.entries.some(function (e) { return e.always && /curious red fox/.test(e.text); }), 'unconditional text becomes always-on lore');
+  ok(CM.lorebook.entries.some(function (e) { return e.keys === 'dragon' && e.prob === 30; }), 'chance becomes lore probability');
+  ok(CM.states.list.some(function (x) { return x.name === 'flustered' && x.keys === 'hug, cuddle' && /ears go flat/.test(x.text); }), 'mood variable becomes a state with its keywords');
+  ok(CM.pacing.phases.some(function (x) { return x.from === 31 && x.to === 60; }), 'message-count range becomes a story phase');
+  ok(CM.rules.list.some(function (r) { return r.conds.length === 1 && r.conds[0].type === 'hour' && r.conds[0].min === 22 && r.conds[0].max === 5; }), 'night check wraps past midnight');
+  ok(CM.rules.list.some(function (r) { return r.conds.some(function (c) { return c.type === 'keyword' && c.keys === 'breakfast'; }) && r.conds.some(function (c) { return c.type === 'hour' && c.min === 6 && c.max === 10; }); }), 'keyword AND hour becomes a rule');
+  ok(CM.stats.list.some(function (x) { return x.name === 'HP'; }) && CM.stats.enabled, 'status-line regex becomes a stat');
+  ok(CM.memory.enabled && CM.time.enabled, 'name capture and clock use switch on Memory and Time');
+  var cc = J.compile(d.project);
+  ok(J.analyze(d.project, cc).filter(function (f) { return f.level === 'error'; }).length === 0, 'converted project has no analyzer errors');
+  require('acorn').parse(cc.code, { ecmaVersion: 5 }); ok(true);
+}
+
 /* merge de-duplicates ids */
 var p0 = PRESETS[1].make(), n0 = p0.modules.lorebook.entries.length;
 var merged = IO.mergeLore(p0, J.importLorebook(J.exportLorebook(p0)), 'append');
